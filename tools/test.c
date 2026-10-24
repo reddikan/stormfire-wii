@@ -99,6 +99,10 @@ static void shot(const Game *g, const char *name)
 /* ------------------------------------------------------------------ */
 static Game *G;
 static Input NONE;
+static int LEVEL;          /* level being tested */
+
+/* fresh game sitting on the title screen of LEVEL */
+static void reset_to(Game *g) { game_init(g); game_set_level(g, LEVEL); }
 
 static void step(Game *g, const Input *in)
 {
@@ -181,7 +185,7 @@ static Result play(int skill, uint32_t seed, int shots, const char *tag)
 {
     Result res;
     memset(&res, 0, sizeof res);
-    game_init(G);
+    reset_to(G);
     G->rng = seed;
     brng = seed * 2654435761u + 7;
     Input start = NONE;
@@ -195,12 +199,21 @@ static Result play(int skill, uint32_t seed, int shots, const char *tag)
         if (skill == 3 && !G->wave_on && G->countdown < 9.0f && G->wave > 0) {
             Input in = NONE; in.pressed = in.held = BTN_X; step(G, &in);
         }
+        static Enemy prev[MAX_EN];
+        int fire0 = G->fire;
+        if (verbose > 1) memcpy(prev, G->en, sizeof prev);
         step(G, &NONE);
         t += 1.0f / 60.0f;
+        if (verbose > 1 && G->fire < fire0)
+            for (int i = 0; i < MAX_EN; i++)
+                if (prev[i].alive && !G->en[i].alive && hypotf(prev[i].x - FIRE_X, prev[i].z - FIRE_Z) < 1.3f)
+                    printf("      leak t=%.0f %s hp %.0f/%.0f from tile %d,%d\n", t, ENEMIES[prev[i].type].name, prev[i].hp, prev[i].maxhp, prev[i].cx, prev[i].cz);
         if (verbose && G->wave != last_wave) {
             int nt = 0;
             for (int r = 0; r < MH; r++) for (int c = 0; c < MW; c++) nt += G->tw[r][c].type >= 0;
-            printf("    t=%4.0f wave %2d start: fire %2d, kills %3d, leaked %2d, gold %4d, towers %d\n", t, G->wave, G->fire, G->kills, G->leaked, G->gold, nt);
+            printf("    t=%4.0f wave %2d start: fire %2d, kills %3d, leaked %2d, gold %4d, towers %d   leaks:", t, G->wave, G->fire, G->kills, G->leaked, G->gold, nt);
+            for (int k = 0; k < EN_TYPES; k++) if (G->leak_by[k]) printf(" %s %d", ENEMIES[k].name, G->leak_by[k]);
+            printf("\n");
             last_wave = G->wave;
         }
         if (shots && G->wave_on && G->wave != shot_wave && G->wave_t > 9.0f && (G->wave == 3 || G->wave == 8 || G->wave == 12)) {
@@ -235,17 +248,38 @@ static double now_ms(void)
 
 static void test_map(void)
 {
-    printf("map\n");
-    for (int r = 0; r < MH; r++) CHECK((int)strlen(MAP_ROWS[r]) == MW, "row %d has %d columns", r, (int)strlen(MAP_ROWS[r]));
-    game_init(G);
+    printf("map %d (%s)\n", LEVEL + 1, LEVELS[LEVEL].name);
+    for (int r = 0; r < MH; r++) CHECK((int)strlen(LEVELS[LEVEL].rows[r]) == MW, "row %d has %d columns", r, (int)strlen(LEVELS[LEVEL].rows[r]));
+    reset_to(G);
+    for (int r = 0; r < MH; r++) for (int c = 0; c < MW; c++)
+        if (G->tile[r][c].kind == TL_PATH) CHECK(G->dist[r][c] > 0, "path tile (%d,%d) cannot reach the fire", c, r);
     for (int i = 0; i < NUM_GATES; i++) {
-        int c = GATES[i][0], r = GATES[i][1];
+        int c = G->lv->gates[i][0], r = G->lv->gates[i][1];
+        CHECK(c == 0 || r == 0 || c == MW - 1 || r == MH - 1, "gate %d is not on the map edge", i);
         CHECK(G->dist[r][c] > 0, "gate %d (%d,%d) does not reach the fire", i, c, r);
         printf("  gate %d (%2d,%2d): %d steps to the fire\n", i, c, r, G->dist[r][c]);
     }
     int build = 0;
     for (int r = 0; r < MH; r++) for (int c = 0; c < MW; c++) build += can_build(G, c, r);
-    printf("  %d buildable tiles, %d waves\n", build, NUM_WAVES);
+    printf("  %d buildable tiles, %d waves\n", build, G->lv->nwaves);
+}
+
+/* level 2+: place towers on the best-scoring spots, like a player would */
+static void auto_build(Game *g, int n)
+{
+    static const int ORD[] = { TW_BLASTER, TW_MORTAR, TW_TESLA, TW_FROST, TW_BLASTER, TW_MORTAR, TW_TESLA, TW_BLASTER, TW_FROST };
+    for (int i = 0; i < n; i++) {
+        int type = ORD[i % 9], bc = -1, br = -1;
+        float bs = -1;
+        for (int r = 1; r < MH - 1; r++) for (int c = 1; c < MW - 1; c++) {
+            if (!can_build(g, c, r)) continue;
+            float s = spot_score(g, c, r, TOWERS[type].range[0], TOWERS[type].air);
+            if (s > bs) { bs = s; bc = c; br = r; }
+        }
+        if (bc < 0) return;
+        press_at(g, bc, br, type, BTN_A);
+        for (int k = 0; k < i % 3; k++) { step(g, &NONE); press_at(g, bc, br, type, BTN_A); }
+    }
 }
 
 static void hand_built(Game *g)
@@ -255,6 +289,7 @@ static void hand_built(Game *g)
         {7, 9, TW_MORTAR, 0}, {12, 9, TW_FROST, 1}, {8, 2, TW_TESLA, 2}, {15, 5, TW_BLASTER, 2},
     };
     g->gold = 99999;
+    if (LEVEL != 0) { auto_build(g, 9); g->gold = 340; return; }
     for (unsigned i = 0; i < sizeof T / sizeof T[0]; i++) {
         press_at(g, T[i][0], T[i][1], T[i][2], BTN_A);
         for (int k = 0; k < T[i][3]; k++) { step(g, &NONE); press_at(g, T[i][0], T[i][1], T[i][2], BTN_A); }
@@ -264,63 +299,70 @@ static void hand_built(Game *g)
 
 static void screenshots(void)
 {
-    printf("screenshots\n");
-    game_init(G);
+    char nm[64];
+    const char *p = LEVEL == 0 ? "" : "L2_";
+    #define SHOT(n) do { snprintf(nm, sizeof nm, "%s%s", p, n); shot(G, nm); } while (0)
+    printf("screenshots level %d\n", LEVEL + 1);
+    reset_to(G);
     for (int i = 0; i < 100; i++) step(G, &NONE);
     G->storm_t = 99; G->flash_t = 10;
-    shot(G, "title");
+    SHOT("title");
     Input a = NONE; a.pressed = a.held = BTN_A;
     step(G, &a);
     for (int i = 0; i < 60; i++) step(G, &NONE);
     G->storm_t = 99; G->flash_t = 10;
-    shot(G, "start");
+    SHOT("start");
     hand_built(G);
     G->cx = 9; G->cz = 9; G->sel = TW_FROST;
     for (int i = 0; i < 40; i++) step(G, &NONE);
     G->storm_t = 99; G->flash_t = 10;
-    shot(G, "built");
+    SHOT("built");
     /* jump to a busy wave */
     G->countdown = 0;
     G->wave = 6;
-    for (int i = 0; i < 60 * 14; i++) { step(G, &NONE); if (G->storm_t < 1) G->storm_t = 99; }
+    for (int i = 0; i < 60 * 14; i++) { step(G, &NONE); if (G->storm_t < 1) G->storm_t = 99; if (G->fire < 5) G->fire = 20; }
     G->flash_t = 10;
-    shot(G, "action");
-    /* a lightning strike */
-    G->storm_t = 0;
-    for (int i = 0; i < 2; i++) step(G, &NONE);
-    G->storm_t = 99;
-    shot(G, "lightning");
-    for (int i = 0; i < 10; i++) step(G, &NONE);
-    shot(G, "lightning_after");
-    Input p = NONE; p.pressed = p.held = BTN_PLUS;
-    step(G, &p);
-    shot(G, "pause");
-    step(G, &p);
+    SHOT("action");
+    if (G->lv->env == ENV_STORM) {
+        /* a lightning strike */
+        G->storm_t = 0;
+        for (int i = 0; i < 2; i++) step(G, &NONE);
+        G->storm_t = 99;
+        SHOT("lightning");
+        for (int i = 0; i < 10; i++) step(G, &NONE);
+        SHOT("lightning_after");
+    }
+    Input pz = NONE; pz.pressed = pz.held = BTN_PLUS;
+    step(G, &pz);
+    SHOT("pause");
+    step(G, &pz);
     /* the boss */
-    G->wave = 11; G->wave_on = 0; G->countdown = 0;
+    G->wave = G->lv->nwaves - 1; G->wave_on = 0; G->countdown = 0;
     for (int i = 0; i < MAX_EN; i++) G->en[i].alive = 0;
     G->gold = 0;
     for (int i = 0; i < 60 * 22; i++) { step(G, &NONE); if (G->storm_t < 1) G->storm_t = 99; if (G->fire < 5) G->fire = 20; }
     G->flash_t = 10;
-    shot(G, "boss");
+    SHOT("boss");
     G->state = ST_WIN; G->end_t = 3; G->fire = 17;
-    shot(G, "win");
+    SHOT("win");
     G->state = ST_LOSE; G->end_t = 3; G->fire = 0;
     for (int i = 0; i < 120; i++) step(G, &NONE);
-    shot(G, "lose");
+    SHOT("lose");
+    #undef SHOT
 }
 
 static void perf(void)
 {
-    printf("performance (native CPU; the Wii is roughly 15-25x slower)\n");
-    game_init(G);
+    printf("performance level %d (native CPU; the Wii is roughly 15-25x slower)\n", LEVEL + 1);
+    reset_to(G);
     Input a = NONE; a.pressed = a.held = BTN_A;
     step(G, &a);
     hand_built(G);
     /* add more towers so the frame is as busy as a late game */
     static const int X[][3] = { {4, 2, TW_BLASTER}, {13, 2, TW_TESLA}, {17, 3, TW_FROST}, {1, 4, TW_MORTAR}, {11, 7, TW_TESLA}, {5, 7, TW_BLASTER}, {16, 9, TW_MORTAR}, {3, 9, TW_BLASTER}, {11, 10, TW_FROST} };
     G->gold = 99999;
-    for (unsigned i = 0; i < sizeof X / sizeof X[0]; i++) press_at(G, X[i][0], X[i][1], X[i][2], BTN_A);
+    if (LEVEL == 0) for (unsigned i = 0; i < sizeof X / sizeof X[0]; i++) press_at(G, X[i][0], X[i][1], X[i][2], BTN_A);
+    else auto_build(G, 9);
     G->wave = 9; G->countdown = 0;
     double tu = 0, tr = 0;
     int maxv = 0, maxseg = 0, frames = 0, maxen = 0;
@@ -353,13 +395,15 @@ static void perf(void)
 
 static void bots(void)
 {
-    printf("bots\n");
+    printf("bots level %d\n", LEVEL + 1);
     static const Bot B[] = { {"idle", 0}, {"sloppy", 1}, {"average", 2}, {"keen", 3} };
     for (unsigned b = 0; b < sizeof B / sizeof B[0]; b++) {
         int wins = 0, n = B[b].skill == 0 ? 1 : 4;
         float fire = 0, wave = 0;
         for (int s = 0; s < n; s++) {
-            Result r = play(B[b].skill, 1000u + (uint32_t)s * 77u, s == 0 && B[b].skill >= 2, B[b].name);
+            char tag[32];
+            snprintf(tag, sizeof tag, "%s%s", LEVEL ? "L2_" : "", B[b].name);
+            Result r = play(B[b].skill, 1000u + (uint32_t)s * 77u, s == 0 && B[b].skill >= 2, tag);
             wins += r.won; fire += (float)r.fire; wave += (float)r.wave;
             printf("  %-8s seed %d: %s wave %2d, fire %2d, %2d towers, %4d gold left, %.0fs\n", B[b].name, s,
                    r.won ? "WON " : "lost", r.wave, r.fire, r.towers, r.gold_left, r.time);
@@ -367,7 +411,7 @@ static void bots(void)
         printf("  %-8s => %d/%d wins, avg wave %.1f, avg fire %.1f\n", B[b].name, wins, n, wave / (float)n, fire / (float)n);
         if (B[b].skill == 0) CHECK(wins == 0, "doing nothing should lose");
         if (B[b].skill == 2) CHECK(wins >= 3, "an average player should usually win");
-        if (B[b].skill == 3) CHECK(wins == 4, "a keen player should always win");
+        if (B[b].skill == 3) CHECK(wins >= (LEVEL == 0 ? 4 : 3), "a keen player should (almost) always win");
     }
 }
 
@@ -375,7 +419,7 @@ static void reel(void)
 {
     /* 20 s of gameplay at 30 fps for a preview video (frames as ppm, piped to ffmpeg by the script) */
     char path[512];
-    game_init(G);
+    reset_to(G);
     Input a = NONE; a.pressed = a.held = BTN_A;
     for (int i = 0; i < 90; i++) step(G, &NONE);
     step(G, &a);
@@ -401,16 +445,23 @@ static void reel(void)
 
 int main(int argc, char **argv)
 {
+    /* usage: test <outdir> [all|reel|shots|perf|bots] [level 1..N] [v] */
     if (argc > 1) outdir = argv[1];
     G = (Game *)calloc(1, (size_t)GAME_SIZE);
-    if (argc > 2 && !strcmp(argv[2], "reel")) { reel(); return 0; }
-    if (argc > 2 && !strcmp(argv[2], "shots")) { screenshots(); return 0; }
-    if (argc > 2 && !strcmp(argv[2], "perf")) { perf(); return 0; }
-    if (argc > 2 && !strcmp(argv[2], "bots")) { verbose = argc > 3; bots(); return 0; }
-    test_map();
-    screenshots();
-    perf();
-    bots();
+    const char *what = argc > 2 ? argv[2] : "all";
+    int only = argc > 3 ? atoi(argv[3]) - 1 : -1;
+    verbose = argc > 4 ? (int)strlen(argv[4]) : 0;
+    for (LEVEL = 0; LEVEL < NUM_LEVELS; LEVEL++) {
+        if (only >= 0 && LEVEL != only) continue;
+        if (!strcmp(what, "reel")) { reel(); continue; }
+        if (!strcmp(what, "shots")) { screenshots(); continue; }
+        if (!strcmp(what, "perf")) { perf(); continue; }
+        if (!strcmp(what, "bots")) { bots(); continue; }
+        test_map();
+        screenshots();
+        perf();
+        bots();
+    }
     printf(fails ? "\n%d FAILURES\n" : "\nall good\n", fails);
     return fails ? 1 : 0;
 }

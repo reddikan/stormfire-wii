@@ -2,13 +2,14 @@
 # Builds and runs the native test harness (no Wii toolchain needed). Screenshots go to tools/out/.
 #   sh tools/run_tests.sh          map checks, screenshots, performance, bot playthroughs
 #   sh tools/run_tests.sh shots    screenshots only
-#   sh tools/run_tests.sh reel     renders tools/out/reel/preview.mp4 (needs ffmpeg)
+#   sh tools/run_tests.sh reel 2   renders tools/out/reel/preview.mp4 of level 2 (needs ffmpeg)
+#   sh tools/run_tests.sh bots 2 v per-wave bot log for level 2
 set -e
 cd "$(dirname "$0")/.."
 mkdir -p tools/out/reel
 cc -O2 -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation \
    source/game.c source/draw.c source/map.c source/r3d.c source/gfx.c source/audio.c tools/test.c -lm -o tools/out/stest
-tools/out/stest tools/out $1
+tools/out/stest tools/out ${1:-all} $2 $3
 python3 -c "
 import glob, os
 from PIL import Image

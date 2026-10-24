@@ -1,5 +1,5 @@
 /*
- * STORMFIRE - a stormy low-poly tower defense game for the Wii.
+ * STORMFIRE - a moody low-poly tower defense game for the Wii.
  *
  * game.c / draw.c / map.c / r3d.c / gfx.c / audio.c are plain C99 and know
  * nothing about the console. The game takes its input as a BTN_* bitmask plus

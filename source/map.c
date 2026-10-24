@@ -1,33 +1,13 @@
 /*
- * STORMFIRE - level data: the map, its six gates, tower and enemy stats, and the waves.
+ * STORMFIRE - level data: maps, gates, tower and enemy stats, and the waves.
  *
  * Map legend
- *   .  path (enemies walk here)          F  the campfire plaza (3 x 3)
- *   #  brick wall (build on top)         t  brick wall with a torch
+ *   .  path (enemies walk here)          F  the campfire plaza (3 x 3, always in the middle)
+ *   #  wall (build on top)               t  wall with a torch
  *   ,  grass lawn (build here too)       T  forest (nothing goes here)
  *   r o y g m b p c   coloured blocks (build on top): red orange yellow green mint blue purple cyan
  */
 #include "game_int.h"
-
-const char *const MAP_ROWS[MH] = {
-    "TTTTT.TTTTTTTT.TTTT",
-    "T,,,b.t,,,,,,#.oooT",
-    "T,,,b.#mmm#,,#...yT",
-    "T,,,b.....#,,rr#.yT",
-    "Tpp##g###.##,,,t...",
-    "Tp...#t#FFF#oo##.#T",
-    "Tp.c....FFF......bT",
-    "T#.cccm#FFF..t##bbT",
-    "...t,#...rr#....#,T",
-    "Tgg#,#.#yyy#t##.mmT",
-    "T,,,,t.....#,,#....",
-    "T,,,,#ooo#.#,,#gggT",
-    "TTTTTTTTTT.TTTTTTTT",
-};
-
-/* N, S, E, W, NE, SE - "cycle" groups walk round the first `gates` of these in order, so the
- * first waves come from two sides, then four, then from every direction */
-const int GATES[NUM_GATES][2] = { {5, 0}, {10, 12}, {18, 4}, {0, 8}, {14, 0}, {18, 10} };
 
 const TowerDef TOWERS[TW_TYPES] = {
     /* name       cost            range              damage          rate              extra            air  colour      glow */
@@ -38,18 +18,26 @@ const TowerDef TOWERS[TW_TYPES] = {
 };
 
 const EnemyDef ENEMIES[EN_TYPES] = {
-    /* name       hp     speed  size   fly  bounty damage */
-    { "CRAWLER",   30,   1.00f, 0.26f, 0,   5,   1 },
-    { "GRUNT",     85,   0.72f, 0.34f, 0,   8,   1 },
-    { "BRUTE",    360,   0.48f, 0.48f, 0,  20,   3 },
-    { "WISP",      50,   0.85f, 0.30f, 1,   6,   1 },
-    { "STORM GOLEM", 1600, 0.30f, 0.80f, 0, 150, 10 },
+    /* name           hp    speed  size   fly bounty dmg armor boss split            colour */
+    { "CRAWLER",       30,  1.00f, 0.26f, 0,   5,   1,  0,   0, -1, 0,           0x3CB4E6FF },
+    { "GRUNT",         85,  0.72f, 0.34f, 0,   8,   1,  0,   0, -1, 0,           0x9A5CE8FF },
+    { "BRUTE",        360,  0.48f, 0.48f, 0,  20,   3,  0,   0, -1, 0,           0xC8483CFF },
+    { "WISP",          50,  0.85f, 0.30f, 1,   6,   1,  0,   0, -1, 0,           0x9CFFD8FF },
+    { "STORM GOLEM", 1600,  0.30f, 0.80f, 0, 150,  10,  0,   1, -1, 0,           0x7C8894FF },
+    /* level 2 */
+    { "BEETLE",       150,  0.62f, 0.36f, 0,  12,   1,  5,   0, -1, 0,           0x2E8C7CFF },
+    { "SLIME",         95,  0.66f, 0.36f, 0,   8,   1,  0,   0, EN_SLIMELET, 2,  0x88D848FF },
+    { "SLIMELET",      26,  0.72f, 0.22f, 0,   3,   1,  0,   0, -1, 0,           0xA8E860FF },
+    { "FOX",           70,  0.85f, 0.30f, 0,   8,   1,  0,   0, -1, 0,           0xE8702CFF },
+    { "CROW",          75,  0.95f, 0.30f, 1,   9,   1,  0,   0, -1, 0,           0x3A3044FF },
+    { "PUMPKIN KING", 2000, 0.27f, 0.85f, 0, 200,  10,  4,   1, EN_GOURD, 4,     0xF08020FF },
+    { "GOURD",         45,  0.95f, 0.24f, 0,   3,   1,  0,   0, -1, 0,           0xF8B030FF },
 };
 
 #define C GATE_CYCLE
 #define R GATE_RANDOM
 #define A GATE_AIR
-const WaveDef WAVES[] = {
+static const WaveDef WAVES1[] = {
     /* n gates hp x  groups: {type, count, gate, delay, gap} */
     { 1, 2, 1.00f, { {EN_CRAWLER, 8, C, 0, 1.4f} } },
     { 2, 2, 1.10f, { {EN_CRAWLER, 10, C, 0, 1.0f}, {EN_GRUNT, 4, C, 7, 2.2f} } },
@@ -65,17 +53,79 @@ const WaveDef WAVES[] = {
     { 5, 6, 5.00f, { {EN_GOLEM, 1, 0, 4, 1.0f}, {EN_BRUTE, 6, C, 0, 3.0f}, {EN_GRUNT, 24, C, 2, 0.5f},
                      {EN_WISP, 12, A, 10, 0.6f}, {EN_CRAWLER, 30, R, 16, 0.25f} } },
 };
-const int NUM_WAVES = (int)(sizeof WAVES / sizeof WAVES[0]);
+
+/* level 2: new enemies, and the waves start tougher */
+static const WaveDef WAVES2[] = {
+    /* n gates hp x  groups: {type, count, gate, delay, gap} */
+    { 2, 2, 1.20f, { {EN_CRAWLER, 6, C, 0, 1.2f}, {EN_SLIME, 3, C, 5, 2.5f} } },
+    { 2, 2, 1.38f, { {EN_FOX, 8, C, 0, 1.4f}, {EN_GRUNT, 4, C, 6, 1.8f} } },
+    { 2, 4, 1.62f, { {EN_BEETLE, 4, C, 0, 2.4f}, {EN_SLIME, 5, C, 4, 1.6f} } },
+    { 2, 4, 1.92f, { {EN_CROW, 6, A, 0, 1.2f}, {EN_FOX, 10, C, 2, 0.9f} } },
+    { 2, 6, 2.28f, { {EN_BEETLE, 7, C, 0, 1.6f}, {EN_GRUNT, 12, C, 3, 0.8f} } },
+    { 2, 6, 2.64f, { {EN_SLIME, 12, C, 0, 0.9f}, {EN_CROW, 8, A, 5, 0.9f} } },
+    { 3, 6, 3.12f, { {EN_BRUTE, 3, C, 0, 4.0f}, {EN_FOX, 16, C, 2, 0.6f}, {EN_BEETLE, 5, C, 8, 1.6f} } },
+    { 3, 6, 3.60f, { {EN_CROW, 12, A, 0, 0.7f}, {EN_SLIME, 12, C, 2, 0.9f}, {EN_BEETLE, 6, C, 6, 1.4f} } },
+    { 2, 6, 4.08f, { {EN_BEETLE, 12, C, 0, 1.1f}, {EN_FOX, 20, R, 4, 0.45f} } },
+    { 3, 6, 4.68f, { {EN_BRUTE, 6, C, 0, 2.6f}, {EN_SLIME, 16, C, 3, 0.7f}, {EN_CROW, 10, A, 8, 0.7f} } },
+    { 3, 6, 5.28f, { {EN_FOX, 26, C, 0, 0.4f}, {EN_BEETLE, 12, C, 4, 1.0f}, {EN_CROW, 14, A, 6, 0.55f} } },
+    { 5, 6, 5.76f, { {EN_PUMPKIN, 1, 0, 4, 1.0f}, {EN_BEETLE, 8, C, 0, 2.2f}, {EN_SLIME, 14, C, 3, 0.8f},
+                     {EN_CROW, 12, A, 10, 0.65f}, {EN_FOX, 24, R, 16, 0.35f} } },
+};
 #undef C
 #undef R
 #undef A
+
+#define NW(a) (int)(sizeof a / sizeof a[0])
+const LevelDef LEVELS[] = {
+    {   "THE STORM", "THE STORM GOLEM COMES!",
+        {
+            "TTTTT.TTTTTTTT.TTTT",
+            "T,,,b.t,,,,,,#.oooT",
+            "T,,,b.#mmm#,,#...yT",
+            "T,,,b.....#,,rr#.yT",
+            "Tpp##g###.##,,,t...",
+            "Tp...#t#FFF#oo##.#T",
+            "Tp.c....FFF......bT",
+            "T#.cccm#FFF..t##bbT",
+            "...t,#...rr#....#,T",
+            "Tgg#,#.#yyy#t##.mmT",
+            "T,,,,t.....#,,#....",
+            "T,,,,#ooo#.#,,#gggT",
+            "TTTTTTTTTT.TTTTTTTT",
+        },
+        /* N, S, E, W, NE, SE: the first waves come from two sides, then four, then every direction */
+        { {5, 0}, {10, 12}, {18, 4}, {0, 8}, {14, 0}, {18, 10} },
+        WAVES1, NW(WAVES1), ENV_STORM, 200,
+    },
+    {   "AUTUMN GOLD", "THE PUMPKIN KING COMES!",
+        {   /* a ring road round the fire with only two ways in (north and south) */
+            "TTT.TTTTTTTTTTT.TTT",
+            "Tyy.#,,,,#......#,T",
+            "T...##oo##.#mmm###T",
+            "T.#bb#.......#,#...",
+            "T.#bb#.rr.yy.#g#.#T",
+            "T....#.pFFFp.#...cT",
+            "Tgg#...pFFFp...#ccT",
+            "T,,#o#.#FFF#.#yy#,T",
+            "T,,#o#.mm.bb....#,T",
+            "T#r#.........oo.##T",
+            ".....#yyy#mm###...T",
+            "Tpp#.....#,,,,#gg.T",
+            "TTTTTTTT.TTTTTTTT.T",
+        },
+        /* NW, SE, E, W, N, S */
+        { {3, 0}, {17, 12}, {18, 3}, {0, 10}, {15, 0}, {8, 12} },
+        WAVES2, NW(WAVES2), ENV_AUTUMN, 240,
+    },
+};
+const int NUM_LEVELS = NW(LEVELS);
 
 void map_load(Game *g)
 {
     for (int r = 0; r < MH; r++)
         for (int c = 0; c < MW; c++) {
             Tile *t = &g->tile[r][c];
-            char ch = MAP_ROWS[r][c];
+            char ch = g->lv->rows[r][c];
             t->torch = 0; t->color = 0; t->puddle = 0; t->h = 0.0f;
             switch (ch) {
             case '.': t->kind = TL_PATH; break;
@@ -93,7 +143,7 @@ void map_load(Game *g)
             }
             /* a few puddles on the paths and the grass */
             uint32_t hsh = (uint32_t)(r * 7919 + c * 104729) * 2654435761u;
-            if ((t->kind == TL_PATH || t->kind == TL_LAWN) && (hsh >> 27) < 6) t->puddle = (uint8_t)(1 + (hsh >> 8) % 3);
+            if (g->lv->env == ENV_STORM && (t->kind == TL_PATH || t->kind == TL_LAWN) && (hsh >> 27) < 6) t->puddle = (uint8_t)(1 + (hsh >> 8) % 3);
         }
 
     /* flow field: breadth-first search outward from the fire along walkable tiles */

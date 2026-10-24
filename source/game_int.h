@@ -46,11 +46,17 @@ typedef struct {
 } Tower;
 
 /* enemies */
-enum { EN_CRAWLER, EN_GRUNT, EN_BRUTE, EN_WISP, EN_GOLEM, EN_TYPES };
+enum { EN_CRAWLER, EN_GRUNT, EN_BRUTE, EN_WISP, EN_GOLEM,                    /* level 1 */
+       EN_BEETLE, EN_SLIME, EN_SLIMELET, EN_FOX, EN_CROW, EN_PUMPKIN, EN_GOURD,  /* level 2 */
+       EN_TYPES };
 typedef struct {
     const char *name;
     float hp, speed, size, fly;
     int   bounty, damage;
+    float armor;            /* flat damage taken off every hit (never below 40% of the hit) */
+    int   boss;             /* gets the big health bar, resists slowing */
+    int   split_type, split_n;   /* spawns these where it dies (-1 = none) */
+    uint32_t color;         /* debris colour */
 } EnemyDef;
 extern const EnemyDef ENEMIES[EN_TYPES];
 
@@ -65,6 +71,10 @@ typedef struct {
     int   cx, cz;           /* tile it is heading for */
     float prog;             /* distance left to the fire (smaller = closer) */
     float zap_t;
+    float dash_t;           /* fox: > 0 while sprinting; counts down to the next sprint when < 0 */
+    float spawn_t;          /* pumpkin king: until it drops the next gourds */
+    float armor_t;          /* flashes when a hit bounces off the armour */
+    float inv_t;            /* just split off a parent: can't be hurt yet */
 } Enemy;
 
 /* projectiles */
@@ -100,6 +110,7 @@ typedef struct {
 } Part;
 
 #define MAX_DROP 230
+#define NUM_LEAVES 70     /* autumn uses the first drops as falling leaves */
 typedef struct { float x, y, z, len; } Drop;
 
 #define MAX_POP 24
@@ -116,17 +127,25 @@ typedef struct { float x, y, z, r, g, b, rad, t, life; } FLight;
 typedef struct { uint8_t type, count, gate; float delay, gap; } Group;
 #define MAX_GROUPS 8
 typedef struct { int n, gates; float hpmul; Group g[MAX_GROUPS]; } WaveDef;   /* gates: how many gates this wave uses */
-extern const WaveDef WAVES[];
-extern const int NUM_WAVES;
 
 #define NUM_GATES 6
-extern const int GATES[NUM_GATES][2];        /* tile on the map edge */
-extern const char *const MAP_ROWS[MH];
+enum { ENV_STORM, ENV_AUTUMN };
+typedef struct {
+    const char *name;               /* shown on the title screen */
+    const char *boss_line;          /* last-wave banner */
+    const char *rows[MH];
+    int   gates[NUM_GATES][2];      /* tiles on the map edge, in the order waves open them */
+    const WaveDef *waves;
+    int   nwaves;
+    int   env;
+    int   start_gold;
+} LevelDef;
+extern const LevelDef LEVELS[];
+extern const int NUM_LEVELS;
 
 #define FIRE_X 9.5f
 #define FIRE_Z 6.5f
 #define FIRE_HP 20
-#define START_GOLD 200
 
 enum { ST_TITLE, ST_PLAY, ST_PAUSE, ST_WIN, ST_LOSE };
 
@@ -134,6 +153,8 @@ enum { ST_TITLE, ST_PLAY, ST_PAUSE, ST_WIN, ST_LOSE };
 
 struct Game {
     int   state;
+    int   level;            /* index into LEVELS */
+    const LevelDef *lv;
     float time;             /* real seconds since boot (never pauses) */
     float t;                /* game seconds */
     uint32_t rng;
@@ -149,7 +170,7 @@ struct Game {
     float rep_t; uint32_t rep_dir;
     float stick_t;
     float gold_flash, fire_flash, err_t, sel_t;
-    int   menu;             /* pause menu item: 0 resume, 1 sound, 2 restart */
+    int   menu;             /* pause menu item: 0 resume, 1 sound, 2 restart, 3 quit to title */
     int   mute;             /* sound effects off */
 
     /* waves */
@@ -161,6 +182,7 @@ struct Game {
     int   gate_rr;
     float banner_t; char banner[40]; char banner2[40];
     int   leaked, kills;
+    int   leak_by[EN_TYPES];      /* stats for the test harness */
     float end_t;
     int   boss;             /* index of the golem, -1 */
 
@@ -197,7 +219,8 @@ static inline float clampf(float v, float a, float b) { return v < a ? a : (v > 
 static inline float lerpf(float a, float b, float t) { return a + (b - a) * t; }
 float frand(Game *g);                       /* 0..1 */
 float frand2(Game *g);                      /* -1..1 */
-void  map_load(Game *g);
+void  map_load(Game *g);                    /* loads g->level */
+void  game_set_level(Game *g, int level);   /* switch level (title screen backdrop) */
 int   tower_cost(int type, int lvl);        /* cost to reach lvl (0 = build) */
 float tower_range(const Tower *t);
 int   tower_sell_value(const Tower *t);

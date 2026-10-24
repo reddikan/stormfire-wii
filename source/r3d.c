@@ -166,6 +166,7 @@ int lt_count;
 #define NY 3
 static const float LY[NY] = { 0.0f, 0.9f, 2.0f };
 static float grid[NY][NZ][NX][3];
+static float clampd(float v) { return v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v); }
 
 void lt_begin(void) { lt_count = 0; }
 
@@ -177,17 +178,41 @@ void lt_add(float x, float y, float z, float r, float g, float b, float radius)
     l->inv = 1.0f / (radius * radius);
 }
 
+/* ambient light: night moonlight by default; lt_set_ambient switches it (golden hour) */
+static float amb_base[3] = { 0.17f, 0.20f, 0.32f }, amb_up[3] = { 0.04f, 0.045f, 0.06f }, amb_dapple;
+static float dap[NZ][NX];
+static int   dap_ok;
+
+void lt_set_ambient(const float base[3], const float up[3], float dapple)
+{
+    for (int i = 0; i < 3; i++) { amb_base[i] = base[i]; amb_up[i] = up[i]; }
+    amb_dapple = dapple;
+    if (!dap_ok) {
+        /* sunlight through gaps in the canopy: a fixed blotchy pattern, brighter towards the sun (left) */
+        for (int iz = 0; iz < NZ; iz++)
+            for (int ix = 0; ix < NX; ix++) {
+                uint32_t h = (uint32_t)ix * 2654435761u ^ (uint32_t)iz * 40503u;
+                h = (h ^ (h >> 15)) * 2246822519u; h ^= h >> 13;
+                float n = (float)(h & 1023) / 1023.0f;
+                float sx = sinf((float)ix * 0.9f + (float)iz * 0.4f) * 0.5f + sinf((float)iz * 1.3f - (float)ix * 0.5f) * 0.5f;
+                dap[iz][ix] = clampd(0.55f * sx + 0.45f * (n * 2.0f - 1.0f));
+            }
+        dap_ok = 1;
+    }
+}
+
 void lt_build(float flash, float amb)
 {
-    /* ambient first: a dim cold moonlight that is a bit stronger higher up; lightning washes everything blue-white */
+    /* ambient first (a bit stronger higher up); lightning washes everything blue-white */
     for (int iy = 0; iy < NY; iy++) {
-        float ar = (0.17f + 0.04f * (float)iy) * amb + flash * 1.05f;
-        float ag = (0.20f + 0.045f * (float)iy) * amb + flash * 1.10f;
-        float ab = (0.32f + 0.06f * (float)iy) * amb + flash * 1.30f;
+        float ar = (amb_base[0] + amb_up[0] * (float)iy) * amb + flash * 1.05f;
+        float ag = (amb_base[1] + amb_up[1] * (float)iy) * amb + flash * 1.10f;
+        float ab = (amb_base[2] + amb_up[2] * (float)iy) * amb + flash * 1.30f;
         for (int iz = 0; iz < NZ; iz++)
             for (int ix = 0; ix < NX; ix++) {
                 float *o = grid[iy][iz][ix];
-                o[0] = ar; o[1] = ag; o[2] = ab;
+                float k = 1.0f + amb_dapple * dap[iz][ix];
+                o[0] = ar * k; o[1] = ag * k; o[2] = ab * (1.0f + amb_dapple * 0.5f * dap[iz][ix]);
             }
     }
     /* then each light only touches the grid points inside its radius */

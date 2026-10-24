@@ -54,6 +54,8 @@ void lt_begin(void);
 void lt_add(float x, float y, float z, float r, float g, float b, float radius);
 /* flash: lightning 0..1; amb: overall ambient scale */
 void lt_build(float flash, float amb);
+/* ambient colour at the ground, extra per height step, and how blotchy the sunlight is (0 = even) */
+void lt_set_ambient(const float base[3], const float up[3], float dapple);
 void lt_at(float x, float y, float z, float out[3]);
 uint32_t lt_shade(uint32_t base, float x, float y, float z, float face);
 extern int lt_count;

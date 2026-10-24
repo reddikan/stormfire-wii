@@ -2,10 +2,15 @@
 <app version="1">
   <name>Stormfire</name>
   <coder>Claude</coder>
-  <version>1.0</version>
+  <version>1.1</version>
   <release_date>20261023000000</release_date>
   <short_description>Stormy low-poly tower defense (Classic Controller)</short_description>
-  <long_description>Keep the campfire burning through a night of rain and lightning. Enemies march in from every side of the forest; build and upgrade four kinds of towers on the walls and blocks to stop them, and survive 12 waves and the Storm Golem.
+  <long_description>Keep the campfire burning. Enemies march in from every side of the forest; build and upgrade four kinds of towers on the walls and blocks to stop them.
+
+Level 1, The Storm: a night of rain and lightning, ending with the Storm Golem.
+Level 2, Autumn Gold: golden hour in an autumn forest with armoured beetles, splitting slimes, sprinting foxes, crows and the Pumpkin King.
+
+Choose a level on the title screen with left / right.
 
 Controls (Classic Controller):
 Left stick / D-Pad: move the cursor
