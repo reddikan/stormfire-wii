@@ -24,6 +24,8 @@ typedef struct {
 extern Cam cam;
 
 void cam_world(float shake_x, float shake_y);
+/* where the world camera looks (map centre) and how many pixels per world unit at that point */
+void cam_config(float lx, float lz, float scale);
 /* draw small models in the HUD: (cx, cy) on screen, `scale` pixels per world unit, lit evenly */
 void cam_ui(float cx, float cy, float scale);
 void cam_restore(void);

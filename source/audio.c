@@ -30,7 +30,7 @@ static const uint8_t VOL[SFX_COUNT] = {
     /* POP */ 120,     /* CRUNCH */ 190, /* BUILD */ 190,  /* UPGRADE */ 200, /* SELL */ 170,   /* ERROR */ 140,
     /* MOVE */ 60,     /* SELECT */ 120, /* WAVE */ 200,   /* CLEAR */ 200,  /* HISS */ 200,   /* THUNDER */ 255,
     /* CRACK */ 230,   /* BOSS */ 240,   /* WIN */ 220,    /* LOSE */ 220,   /* PAUSE */ 120,  /* START */ 200,
-    /* COIN */ 170
+    /* COIN */ 170,    /* GUST */ 150,   /* CANNON */ 220, /* SPLASH */ 160
 };
 
 /* ------------------------------------------------------------------ */
@@ -376,6 +376,29 @@ void audio_init(void)
     noise(0.02f, 0.5f, 3000, 400, 0.8f, 0.7f, 0.001f, 0.12f, F_LP);
     tone(0.0f, 0.3f, 180, 50, 0.6f, 0.001f, 0.1f, W_SIN, 0, 0);
     finish_fx(SFX_CRACK, 0.3f, 0.5f);
+
+    /* --- the sea --- */
+    begin();                                                         /* wind gust: a swelling, whistling howl */
+    noise(0.0f, 2.4f, 400, 1400, 3.0f, 0.8f, 0.7f, 0.9f, F_BP);
+    noise(0.2f, 2.1f, 900, 2600, 6.0f, 0.35f, 0.6f, 0.7f, F_BP);
+    noise(0.0f, 2.4f, 250, 180, 0.7f, 0.5f, 0.5f, 1.0f, F_LP);
+    finish_fx(SFX_GUST, 0.0f, 0.0f);
+
+    begin();                                                         /* cannon broadside: three booms rolling down the deck */
+    for (int i = 0; i < 3; i++) {
+        float t0 = 0.13f * (float)i;
+        tone(t0, 0.7f, 110, 32, 0.9f, 0.001f, 0.2f, W_SIN, 0, 0);
+        noise(t0, 0.6f, 2600, 120, 0.7f, 0.8f, 0.001f, 0.14f, F_LP);
+        noise(t0, 0.08f, 5000, 2000, 1.0f, 0.4f, 0.001f, 0.02f, F_BP);
+    }
+    finish_fx(SFX_CANNON, 0.35f, 0.7f);
+
+    begin();                                                         /* splash: a slap and a wash of spray */
+    tone(0, 0.12f, 260, 90, 0.6f, 0.001f, 0.04f, W_SIN, 0, 0);
+    noise(0.0f, 0.6f, 3000, 900, 0.8f, 0.8f, 0.005f, 0.18f, F_LP);
+    noise(0.03f, 0.4f, 6000, 2500, 1.2f, 0.35f, 0.01f, 0.1f, F_HP);
+    for (int i = 0; i < 4; i++) tone(0.08f + 0.06f * (float)i, 0.08f, 600 + 300 * (float)i, 1400 + 200 * (float)i, 0.15f, 0.002f, 0.03f, W_SIN, 0, 0);
+    finish_fx(SFX_SPLASH, 0.2f, 0.3f);
 }
 
 const int16_t *audio_data(int id) { return SFX[id]; }

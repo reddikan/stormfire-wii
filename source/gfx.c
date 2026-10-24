@@ -16,27 +16,35 @@ GSeg gfx_seg[GFX_MAX_SEG];
 int  gfx_nv, gfx_nseg;
 
 static int   cur_mode;
-typedef struct { float ox, oy, zoom; int par; float glitch; uint32_t seed; float ax, ay, bx, cx, by, cy; int ident; } GfxView;
-static GfxView gfx_vt = { 0, 0, 1.0f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };   /* file-private, so the compiler keeps it in registers */
+/* the world view: a 2x3 affine (zoom, pan, shake with depth parallax, the sea's roll and bob), plus on level 5 a
+ * rolling swell that lifts each vertex by a wave running across the screen */
+typedef struct { float ox, oy, zoom; int par; int sea; float m00, m01, m02, m10, m11, m12; int ident; float px, py; float roll, bob; } GfxView;
+static GfxView gfx_vt = { 0, 0, 1.0f, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0 };   /* file-private, so the compiler keeps it in registers */
+
+#define SEA_N 64
+#define SEA_G 32                                  /* guard cells either side: vertices a little off screen */
+static float sea_dy[SEA_N + 2 * SEA_G + 1], sea_on;
+#define SEA_K ((float)SEA_N / (float)VW)
+
+static inline float sea_lift(float x)
+{
+    float u = x * SEA_K + (float)SEA_G;
+    u = u < 0.0f ? 0.0f : (u > (float)(SEA_N + 2 * SEA_G) ? (float)(SEA_N + 2 * SEA_G) : u);
+    return sea_dy[(int)u];
+}
 
 static inline void gfx_xform_inl(float *px, float *py)
 {
     float x = *px, y = *py;
-    float nx = x * gfx_vt.zoom + gfx_vt.ax + gfx_vt.bx + gfx_vt.cx * y;
-    float ny = y * gfx_vt.zoom + gfx_vt.ay + gfx_vt.by + gfx_vt.cy * y;
-    if (gfx_vt.glitch > 0) {                      /* slice glitch: some horizontal bands slide sideways */
-        uint32_t h = ((uint32_t)(int)(ny * (1.0f / 13.0f)) + 7u) * 2654435761u ^ gfx_vt.seed;
-        h ^= h >> 15;
-        if ((h & 3) == 0) nx += ((h & 16) ? 1.0f : -1.0f) * gfx_vt.glitch * (0.4f + (float)((h >> 5) & 7) * 0.09f);
-    }
+    float nx = gfx_vt.m00 * x + gfx_vt.m01 * y + gfx_vt.m02;
+    float ny = gfx_vt.m10 * x + gfx_vt.m11 * y + gfx_vt.m12;
+    if (gfx_vt.sea) ny += sea_lift(nx);
     *px = nx; *py = ny;
 }
 #define v_ox gfx_vt.ox
 #define v_oy gfx_vt.oy
 #define v_zoom gfx_vt.zoom
 #define v_par gfx_vt.par
-#define v_glitch gfx_vt.glitch
-#define v_seed gfx_vt.seed
 
 uint32_t col_mix(uint32_t a, uint32_t b, float t)
 {
@@ -98,28 +106,56 @@ void gfx_blend(int mode)
  *   x' = x*zoom + ax + (bx + cx*y),  y' = y*zoom + ay + (by + cy*y)   (b + c*y is the parallax offset) */
 static void vt_update(void)
 {
-    gfx_vt.ax = VW * 0.5f * (1.0f - v_zoom);
-    gfx_vt.ay = VH * 0.5f * (1.0f - v_zoom);
-    if (v_par) { gfx_vt.bx = v_ox * 0.55f; gfx_vt.cx = v_ox * 0.9f / VH; gfx_vt.by = v_oy * 0.55f; gfx_vt.cy = v_oy * 0.9f / VH; }
-    else { gfx_vt.bx = v_ox; gfx_vt.cx = 0; gfx_vt.by = v_oy; gfx_vt.cy = 0; }
+    float z = v_zoom, ax = VW * 0.5f * (1.0f - z) + gfx_vt.px, ay = VH * 0.5f * (1.0f - z) + gfx_vt.py;
+    float bx, cx, by, cy;
+    if (v_par) { bx = v_ox * 0.55f; cx = v_ox * 0.9f / VH; by = v_oy * 0.55f; cy = v_oy * 0.9f / VH; }
+    else { bx = v_ox; cx = 0; by = v_oy; cy = 0; }
+    float m00 = z, m01 = cx, m02 = ax + bx, m10 = 0, m11 = z + cy, m12 = ay + by;
+    float r = gfx_vt.sea ? gfx_vt.roll : 0.0f;
+    if (gfx_vt.sea) {                             /* roll about the screen centre, then bob */
+        float n00 = m00 - r * m10, n01 = m01 - r * m11, n02 = m02 - r * (m12 - VH * 0.5f);
+        float n10 = m10 + r * m00, n11 = m11 + r * m01, n12 = m12 + r * (m02 - VW * 0.5f) + gfx_vt.bob;
+        m00 = n00; m01 = n01; m02 = n02; m10 = n10; m11 = n11; m12 = n12;
+    }
+    gfx_vt.m00 = m00; gfx_vt.m01 = m01; gfx_vt.m02 = m02; gfx_vt.m10 = m10; gfx_vt.m11 = m11; gfx_vt.m12 = m12;
     /* nothing moving the view (the usual case): vertices pass straight through */
-    gfx_vt.ident = v_zoom == 1.0f && fabsf(v_ox) < 0.05f && fabsf(v_oy) < 0.05f && v_glitch <= 0;
+    gfx_vt.ident = z == 1.0f && fabsf(v_ox) < 0.05f && fabsf(v_oy) < 0.05f && !gfx_vt.sea && fabsf(gfx_vt.px) < 0.05f && fabsf(gfx_vt.py) < 0.05f;
 }
 void gfx_view(float ox, float oy, float zoom) { v_ox = ox; v_oy = oy; v_zoom = zoom; vt_update(); }
-void gfx_view_reset(void) { v_ox = 0; v_oy = 0; v_zoom = 1.0f; v_par = 0; v_glitch = 0; vt_update(); }
-void gfx_fx(int parallax, float glitch, uint32_t seed) { v_par = parallax; v_glitch = glitch; v_seed = seed; vt_update(); }
+void gfx_view_reset(void) { v_ox = 0; v_oy = 0; v_zoom = 1.0f; v_par = 0; gfx_vt.sea = 0; gfx_vt.px = gfx_vt.py = 0; vt_update(); }
+void gfx_pan(float px, float py) { gfx_vt.px = px; gfx_vt.py = py; vt_update(); }
+void gfx_fx(int parallax, int sea) { v_par = parallax; gfx_vt.sea = sea && sea_on > 0; vt_update(); }
+
+void gfx_sea(float amp, float roll, float bob, float t)
+{
+    sea_on = amp;
+    gfx_vt.roll = roll; gfx_vt.bob = bob;
+    if (amp <= 0) return;
+    for (int i = 0; i <= SEA_N + 2 * SEA_G; i++) {
+        float u = (float)(i - SEA_G) / (float)SEA_N;
+        /* two swells crossing, travelling across the screen */
+        sea_dy[i] = amp * (0.75f * sinf(u * 8.0f - t * 1.15f) + 0.25f * sinf(u * 17.0f - t * 1.9f + 1.0f));
+    }
+}
 
 void gfx_xform(float *px, float *py) { gfx_xform_inl(px, py); }
 
 void gfx_xform_n(GVtx *v, int n)
 {
     if (gfx_vt.ident) return;
-    const float z = gfx_vt.zoom, ax = gfx_vt.ax + gfx_vt.bx, ay = gfx_vt.ay + gfx_vt.by, cx = gfx_vt.cx, cy = gfx_vt.cy;
-    if (gfx_vt.glitch > 0) { for (int i = 0; i < n; i++) gfx_xform_inl(&v[i].x, &v[i].y); return; }
+    const float m00 = gfx_vt.m00, m01 = gfx_vt.m01, m02 = gfx_vt.m02, m10 = gfx_vt.m10, m11 = gfx_vt.m11, m12 = gfx_vt.m12;
+    if (gfx_vt.sea) {
+        for (int i = 0; i < n; i++) {
+            float x = v[i].x, y = v[i].y, nx = m00 * x + m01 * y + m02;
+            v[i].x = nx;
+            v[i].y = m10 * x + m11 * y + m12 + sea_lift(nx);
+        }
+        return;
+    }
     for (int i = 0; i < n; i++) {
-        float y = v[i].y;
-        v[i].x = v[i].x * z + ax + cx * y;
-        v[i].y = y * z + ay + cy * y;
+        float x = v[i].x, y = v[i].y;
+        v[i].x = m00 * x + m01 * y + m02;
+        v[i].y = m10 * x + m11 * y + m12;
     }
 }
 

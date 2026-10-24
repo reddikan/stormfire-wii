@@ -51,8 +51,11 @@ void gfx_blend(int mode);
 /* view transform applied to everything: zoom about the screen centre, then offset (screen shake) */
 void gfx_view(float ox, float oy, float zoom);
 void gfx_view_reset(void);
-/* battle feel for the world layer: depth parallax on the view offset, and a slice glitch of `glitch` pixels */
-void gfx_fx(int parallax, float glitch, uint32_t seed);
+/* battle feel for the world layer: depth parallax on the view offset, and (level 5) the sea swell */
+void gfx_fx(int parallax, int sea);
+/* set up the sea swell for this frame: wave amplitude and bob in pixels, roll in radians (0 amp = off) */
+void gfx_sea(float amp, float roll, float bob, float t);
+void gfx_pan(float px, float py);           /* a plain offset (camera pan), never scaled by parallax */
 void gfx_xform(float *x, float *y);          /* the current view transform, for code that writes vertices itself */
 
 void gfx_xform_n(GVtx *v, int n);           /* apply the view transform to n vertices written directly */

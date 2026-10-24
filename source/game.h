@@ -24,7 +24,9 @@ enum {
     BTN_Y     = 1 << 7,     /* fast forward on / off    */
     BTN_L     = 1 << 8,     /* previous tower type      */
     BTN_R     = 1 << 9,     /* next tower type          */
-    BTN_PLUS  = 1 << 10     /* pause                    */
+    BTN_PLUS  = 1 << 10,    /* pause                    */
+    BTN_ZL    = 1 << 11,    /* zoom out (L2)            */
+    BTN_ZR    = 1 << 12     /* zoom in  (R2)            */
 };
 
 typedef struct {

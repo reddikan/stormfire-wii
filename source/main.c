@@ -182,8 +182,10 @@ static u32 read_input(Input *in)
     if (h & WPAD_CLASSIC_BUTTON_B)     b |= BTN_B;
     if (h & WPAD_CLASSIC_BUTTON_X)     b |= BTN_X;
     if (h & WPAD_CLASSIC_BUTTON_Y)     b |= BTN_Y;
-    if (h & (WPAD_CLASSIC_BUTTON_FULL_L | WPAD_CLASSIC_BUTTON_ZL)) b |= BTN_L;
-    if (h & (WPAD_CLASSIC_BUTTON_FULL_R | WPAD_CLASSIC_BUTTON_ZR)) b |= BTN_R;
+    if (h & WPAD_CLASSIC_BUTTON_FULL_L) b |= BTN_L;      /* L1 / R1: choose tower */
+    if (h & WPAD_CLASSIC_BUTTON_FULL_R) b |= BTN_R;
+    if (h & WPAD_CLASSIC_BUTTON_ZL)     b |= BTN_ZL;     /* L2 / R2: zoom */
+    if (h & WPAD_CLASSIC_BUTTON_ZR)     b |= BTN_ZR;
     if (h & WPAD_CLASSIC_BUTTON_PLUS)  b |= BTN_PLUS;
     if (h & WPAD_CLASSIC_BUTTON_MINUS) b |= X_MINUS;
     if ((h & WPAD_CLASSIC_BUTTON_HOME) || (h & WPAD_BUTTON_HOME)) b |= X_HOME;

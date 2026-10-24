@@ -9,6 +9,8 @@
  *                      finger snaps and xylophone "bones"
  *   3  Dawn Isle     - slow and mysterious: airy pads, a sparse echoing piano, wind chimes, a low drone
  *                      and the wind
+ *   4  Pirate Storm  - an epic stormy sea shanty in D minor, 6/8: a fiddle lead, wheezing accordion, low brass
+ *                      swells, timpani and a bodhran, with the gale howling underneath
  */
 #ifndef MUSIC_H
 #define MUSIC_H
@@ -16,7 +18,7 @@
 #include <stdint.h>
 
 #define MUS_RATE   22050
-#define MUS_TRACKS 4
+#define MUS_TRACKS 5
 
 void           music_init(void);            /* compose + render every track (call once) */
 const int16_t *music_data(int track);

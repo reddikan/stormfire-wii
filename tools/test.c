@@ -147,7 +147,7 @@ static void bot_think(Game *g, int skill)
 {
     if (skill == 0 || g->state != ST_PLAY) return;
     /* the build order mixes types; sloppy bots think less often and pick worse spots */
-    static const int ORDER[] = { TW_BLASTER, TW_BLASTER, TW_FROST, TW_MORTAR, TW_TESLA, TW_BLASTER, TW_MORTAR, TW_FROST, TW_TESLA, TW_TESLA, TW_MORTAR, TW_BLASTER };
+    static const int ORDER[] = { TW_BLASTER, TW_BLASTER, TW_FROST, TW_MORTAR, TW_TESLA, TW_BLASTER, TW_MORTAR, TW_FROST, TW_TESLA, TW_PRISM, TW_MORTAR, TW_BLASTER, TW_TESLA, TW_PRISM };
     int ntw = 0;
     for (int r = 0; r < MH; r++) for (int c = 0; c < MW; c++) ntw += g->tw[r][c].type >= 0;
     int want = ORDER[ntw % (int)(sizeof ORDER / sizeof ORDER[0])];
@@ -250,11 +250,12 @@ static double now_ms(void)
 static void test_map(void)
 {
     printf("map %d (%s)\n", LEVEL + 1, LEVELS[LEVEL].name);
+    reset_to(G);
     for (int r = 0; r < MH; r++) CHECK((int)strlen(LEVELS[LEVEL].rows[r]) == MW, "row %d has %d columns", r, (int)strlen(LEVELS[LEVEL].rows[r]));
     reset_to(G);
     for (int r = 0; r < MH; r++) for (int c = 0; c < MW; c++)
         if (G->tile[r][c].kind == TL_PATH) CHECK(G->dist[r][c] > 0, "path tile (%d,%d) cannot reach the fire", c, r);
-    for (int i = 0; i < NUM_GATES; i++) {
+    for (int i = 0; i < G->lv->ngates; i++) {
         int c = G->lv->gates[i][0], r = G->lv->gates[i][1];
         CHECK(c == 0 || r == 0 || c == MW - 1 || r == MH - 1, "gate %d is not on the map edge", i);
         CHECK(G->dist[r][c] > 0, "gate %d (%d,%d) does not reach the fire", i, c, r);
@@ -268,7 +269,7 @@ static void test_map(void)
 /* level 2+: place towers on the best-scoring spots, like a player would */
 static void auto_build(Game *g, int n)
 {
-    static const int ORD[] = { TW_BLASTER, TW_MORTAR, TW_TESLA, TW_FROST, TW_BLASTER, TW_MORTAR, TW_TESLA, TW_BLASTER, TW_FROST };
+    static const int ORD[] = { TW_BLASTER, TW_MORTAR, TW_TESLA, TW_FROST, TW_PRISM, TW_MORTAR, TW_TESLA, TW_BLASTER, TW_FROST };
     for (int i = 0; i < n; i++) {
         int type = ORD[i % 9], bc = -1, br = -1;
         float bs = -1;
@@ -287,7 +288,7 @@ static void hand_built(Game *g)
 {
     static const int T[][4] = {
         {6, 4, TW_BLASTER, 1}, {11, 5, TW_TESLA, 0}, {13, 7, TW_MORTAR, 2}, {3, 6, TW_FROST, 0}, {16, 7, TW_BLASTER, 0},
-        {7, 9, TW_MORTAR, 0}, {12, 9, TW_FROST, 1}, {8, 2, TW_TESLA, 2}, {15, 5, TW_BLASTER, 2},
+        {7, 9, TW_MORTAR, 0}, {12, 9, TW_FROST, 1}, {8, 2, TW_TESLA, 2}, {15, 5, TW_BLASTER, 2}, {11, 3, TW_PRISM, 1},
     };
     g->gold = 99999;
     if (LEVEL != 0) { auto_build(g, 9); g->gold = 340; return; }
@@ -325,10 +326,42 @@ static void screenshots(void)
     for (int i = 0; i < 60 * 14; i++) { step(G, &NONE); if (G->storm_t < 1) G->storm_t = 99; if (G->fire < 5) G->fire = 20; }
     G->flash_t = 10;
     SHOT("action");
-    G->glitch = 0.09f; G->shake = 0.6f; G->punch = 1.0f;     /* a mortar impact frame: shake, glitch, punch */
+    G->shake = 0.6f; G->punch = 1.0f;     /* a mortar impact frame: shake, punch */
     SHOT("impact");
-    G->glitch = 0; G->shake = 0; G->punch = 0;
-    if (G->lv->env == ENV_STORM) {
+    G->shake = 0; G->punch = 0;
+    G->zoom = G->zoom_t = 2.0f;                               /* zoomed in with R2 */
+    SHOT("zoom");
+    G->zoom = G->zoom_t = 1.0f;
+    {
+        /* a line-up of this level's enemies, close up */
+        int types[16], nt = 0;
+        for (int w = 0; w < G->lv->nwaves; w++)
+            for (int k = 0; k < G->lv->waves[w].n; k++) {
+                int ty = G->lv->waves[w].g[k].type, dup = 0;
+                for (int j = 0; j < nt; j++) dup |= types[j] == ty;
+                if (!dup && nt < 16) types[nt++] = ty;
+            }
+        Enemy keep[MAX_EN];
+        memcpy(keep, G->en, sizeof keep);
+        memset(G->en, 0, sizeof G->en);
+        for (int j = 0; j < nt; j++) {
+            Enemy *e = &G->en[j];
+            const EnemyDef *d = &ENEMIES[types[j]];
+            e->alive = 1; e->type = (uint8_t)types[j]; e->fly = (uint8_t)d->fly;
+            e->hp = e->maxhp = d->hp; e->speed = d->speed;
+            static float lx; if (j == 0) lx = FIRE_X - 3.6f;
+            lx += d->size * 1.6f; e->x = lx; lx += d->size * 1.6f + 0.25f;
+            e->z = FIRE_Z + 2.6f; e->y = d->fly ? 1.0f : 0.0f;
+            e->ang = 1.5708f - 0.5f; e->anim = (float)j; e->prog = 99; e->spawn_t = 9; e->pulse_t = 9; e->dash_t = -5;
+        }
+        G->cx = (int)FIRE_X; G->cz = (int)(FIRE_Z + 2.6f); G->cur_x = (float)G->cx; G->cur_z = (float)G->cz;
+        G->zoom = G->zoom_t = ZOOM_MAX;
+        for (int i = 0; i < 60; i++) game_render(G);              /* let the zoom pan settle on the cursor */
+        SHOT("lineup");
+        G->zoom = G->zoom_t = 1.0f;
+        memcpy(G->en, keep, sizeof keep);
+    }
+    if (G->lv->env == ENV_STORM || G->lv->env == ENV_PIRATE) {
         /* a lightning strike */
         G->storm_t = 0;
         for (int i = 0; i < 2; i++) step(G, &NONE);
@@ -433,6 +466,32 @@ static void reel(void)
     for (int i = 0; i < 60 * 8; i++) { step(G, &NONE); if (G->fire < 5) G->fire = 20; }
     G->storm_t = 3.5f;
     int fr = 0;
+    if (G->lv->env == ENV_PIRATE) {
+        /* level 5: the storm and the swell, a gust, a zoom in on the action, then the Kraken */
+        G->gust_t = 2.5f;
+        for (int i = 0; i < 60 * 24; i++) {
+            if (i == 60 * 7) { G->cx = (int)FIRE_X - 4; G->cz = (int)FIRE_Z + 2; G->zoom_t = 2.0f; }
+            if (i == 60 * 9) G->cx += 2;
+            if (i == 60 * 11) G->zoom_t = 1.0f;
+            if (i == 60 * 13) {
+                /* skip ahead to the last wave, with the Kraken already halfway in */
+                for (int k = 0; k < MAX_EN; k++) G->en[k].alive = 0;
+                G->wave = G->lv->nwaves - 1; G->wave_on = 0; G->countdown = 0;
+                for (int k = 0; k < 60 * 40; k++) { step(G, &NONE); if (G->fire < 5) G->fire = 20; if (G->boss >= 0) G->en[G->boss].hp = G->en[G->boss].maxhp; }
+                if (G->boss >= 0) { G->cx = (int)G->en[G->boss].x; G->cz = (int)G->en[G->boss].z; if (G->cx < 0) G->cx = 0; if (G->cz < 0) G->cz = 0; if (G->cx >= MW) G->cx = MW - 1; if (G->cz >= MH) G->cz = MH - 1; }
+                G->storm_t = 2.0f; G->gust_t = 4.0f;
+            }
+            if (i == 60 * 16) G->zoom_t = 1.7f;
+            if (i == 60 * 21) G->zoom_t = 1.0f;
+            step(G, &NONE);
+            if (G->fire < 5) G->fire = 20;
+            if (i & 1) continue;
+            game_render(G);
+            raster();
+            snprintf(path, sizeof path, "%s/reel/f%04d.ppm", outdir, fr++);
+            save_ppm(path);
+        }
+    } else
     for (int i = 0; i < 60 * 20; i++) {
         if (i == 60 * 6) { G->cx = 10; G->cz = 9; }
         if (i == 60 * 9) { G->sel = TW_TESLA; }
@@ -446,11 +505,11 @@ static void reel(void)
         save_ppm(path);
     }
     printf("  reel: %d frames\n", fr);
-    /* the level's music for the same 20 s, for the preview video */
+    /* the level's music for the same length, for the preview video */
     snprintf(path, sizeof path, "%s/reel/music.wav", outdir);
     FILE *f = fopen(path, "wb");
     if (f) {
-        int tr = game_music(G) < 0 ? LEVEL % MUS_TRACKS : game_music(G), n = MUS_RATE * 20, sr = MUS_RATE, br = MUS_RATE * 2, ds = n * 2, cs = 36 + ds, fmt = 16;
+        int tr = game_music(G) < 0 ? LEVEL % MUS_TRACKS : game_music(G), n = MUS_RATE * (fr / 30), sr = MUS_RATE, br = MUS_RATE * 2, ds = n * 2, cs = 36 + ds, fmt = 16;
         short one = 1, ba = 2, bits = 16;
         fwrite("RIFF", 1, 4, f); fwrite(&cs, 4, 1, f); fwrite("WAVEfmt ", 1, 8, f); fwrite(&fmt, 4, 1, f);
         fwrite(&one, 2, 1, f); fwrite(&one, 2, 1, f); fwrite(&sr, 4, 1, f); fwrite(&br, 4, 1, f); fwrite(&ba, 2, 1, f); fwrite(&bits, 2, 1, f);

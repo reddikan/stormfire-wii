@@ -25,7 +25,7 @@ static float   BEAT;                      /* seconds per beat */
 static uint32_t rng = 0x1234567u;
 static int     ready;
 
-static const uint8_t VOL[MUS_TRACKS] = { 100, 92, 96, 100 };
+static const uint8_t VOL[MUS_TRACKS] = { 100, 92, 96, 100, 104 };
 
 static float frnd(void)                  /* -1..1 */
 {
@@ -494,6 +494,135 @@ static void track_isle(void)
     finish(3);
 }
 
+/* fiddle: a bowed sawtooth through two low-passes, delayed vibrato, a little bow scratch at the start */
+static void fiddle(float b, float dur, float m, float vel)
+{
+    int s0 = (int)(b * BEAT * SR), n = (int)((dur * BEAT + 0.12f) * SR);
+    float f = mtof(m), ph = 0, l1 = 0, l2 = 0, bn = 0;
+    for (int i = 0; i < n; i++) {
+        float t = (float)i / SR;
+        float vib = 1.0f + (t > 0.12f ? 0.0045f * sinf(TAU_F * 5.8f * t) * fminf((t - 0.12f) * 4.0f, 1.0f) : 0.0f);
+        float e = env_adr(i, n, 0.035f, 0, 0.09f);
+        float saw = 2.0f * ph - 1.0f;
+        l1 += (saw - l1) * 0.32f; l2 += (l1 - l2) * 0.4f;
+        bn += (frnd() - bn) * 0.5f;
+        float scratch = t < 0.05f ? bn * (1.0f - t / 0.05f) * 0.35f : 0.0f;
+        put(s0 + i, (l2 + scratch) * e * vel * 0.3f);
+        ph += f * vib / SR; ph -= floorf(ph);
+    }
+}
+
+/* accordion: two slightly detuned reeds (soft square waves) beating against each other */
+static void accordion(float b, float dur, float m, float vel)
+{
+    int s0 = (int)(b * BEAT * SR), n = (int)((dur * BEAT + 0.06f) * SR);
+    float f = mtof(m), p1 = 0, p2 = 0, lp = 0;
+    for (int i = 0; i < n; i++) {
+        float e = env_adr(i, n, 0.025f, 0, 0.05f);
+        float v = (p1 < 0.5f ? 1.0f : -1.0f) + (p2 < 0.45f ? 0.8f : -0.8f);
+        lp += (v - lp) * 0.18f;
+        put(s0 + i, lp * e * vel * 0.09f);
+        p1 += f * 1.0025f / SR; p1 -= floorf(p1);
+        p2 += f * 0.9975f / SR; p2 -= floorf(p2);
+    }
+}
+
+/* low brass: a sawtooth whose filter opens as the note swells */
+static void brass(float b, float dur, float m, float vel)
+{
+    int s0 = (int)(b * BEAT * SR), n = (int)((dur * BEAT + 0.2f) * SR);
+    float f = mtof(m), ph = 0, z1 = 0, z2 = 0;
+    for (int i = 0; i < n; i++) {
+        float e = env_adr(i, n, 0.18f, 0, 0.2f);
+        float k = 0.03f + 0.12f * e;
+        float saw = 2.0f * ph - 1.0f;
+        z1 += (saw - z1) * k; z2 += (z1 - z2) * k;
+        put(s0 + i, z2 * e * vel * 0.5f);
+        ph += f / SR; ph -= floorf(ph);
+    }
+}
+
+/* timpani: a tuned drum - a sine that sags a little in pitch, plus a soft mallet thump */
+static void timpani(float b, float m, float vel)
+{
+    int s0 = (int)(b * BEAT * SR), n = (int)(1.1f * SR);
+    float f = mtof(m), ph = 0, lp = 0;
+    for (int i = 0; i < n; i++) {
+        float t = (float)i / SR;
+        float ff = f * (1.0f + 0.06f * expf(-t * 25.0f));
+        lp += (frnd() - lp) * 0.08f;
+        float v = sinf(TAU_F * ph) * expf(-t * 3.2f) + 0.4f * sinf(TAU_F * ph * 1.5f) * expf(-t * 6.0f) + lp * 1.5f * expf(-t * 30.0f);
+        put(s0 + i, v * vel * 0.5f);
+        ph += ff / SR; ph -= floorf(ph);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* 4: Pirate Storm - an epic sea shanty, D minor, 6/8 (eighth = 200)   */
+/* ------------------------------------------------------------------ */
+static void track_pirate(void)
+{
+    begin(200, 96);                            /* 16 bars of six eighths */
+    enum { DM, CM, AM, FM, BB };
+    static const int PROG[16] = { DM, DM, CM, CM, DM, DM, AM, DM, FM, CM, DM, AM, BB, CM, AM, DM };
+    static const float ROOT[5] = { 38, 36, 45, 41, 46 };
+    static const float CH[5][3] = { {62, 65, 69}, {60, 64, 67}, {61, 64, 69}, {60, 65, 69}, {62, 65, 70} };
+    for (int bar = 0; bar < 16; bar++) {
+        int c = PROG[bar];
+        float b0 = (float)bar * 6;
+        int big = bar >= 8;
+        /* oom-pah-pah: bass on 1 and 4, the accordion wheezing the chord in between */
+        bass(b0, 2.5f, ROOT[c], 0.7f);
+        bass(b0 + 3, 2.5f, ROOT[c] + 7, 0.55f);
+        for (int q = 0; q < 6; q++) {
+            if (q == 0 || q == 3) continue;
+            for (int k = 0; k < 3; k++) accordion(b0 + (float)q, 0.75f, CH[c][k], q == 1 || q == 4 ? 0.75f : 0.55f);
+        }
+        /* brass swells: root and fifth, louder in the second half */
+        brass(b0, 5.6f, ROOT[c] + 12, big ? 0.38f : 0.24f);
+        brass(b0, 5.6f, ROOT[c] + 19, big ? 0.3f : 0.18f);
+        if (big) brass(b0, 5.6f, CH[c][1] - 12, 0.22f);
+        /* timpani and bodhran */
+        float tp = ROOT[c] < 40 ? ROOT[c] + 12 : ROOT[c];
+        timpani(b0, tp, 0.7f);
+        timpani(b0 + 3, tp - 5, 0.45f);
+        for (int q = 0; q < 6; q++)
+            noise_hit(b0 + (float)q, q == 0 || q == 3 ? 0.55f : 0.25f, q == 0 || q == 3 ? 0.06f : 0.03f, 260.0f, 1.2f);
+        if ((bar & 7) == 7)                    /* a timpani roll into the next phrase */
+            for (int k = 0; k < 6; k++) timpani(b0 + 3.0f + (float)k * 0.5f, 45, 0.25f + 0.08f * (float)k);
+        if ((bar & 3) == 1) noise_hit(b0 + 5, 0.4f, 0.12f, 5000.0f, 0.8f);   /* cymbal splash */
+    }
+    static const Note MEL[16][6] = {
+        { {0, 2, 69}, {2, 1, 74}, {3, 2, 74}, {5, 1, 72} },
+        { {0, 2, 70}, {2, 1, 69}, {3, 3, 65} },
+        { {0, 2, 67}, {2, 1, 72}, {3, 2, 72}, {5, 1, 70} },
+        { {0, 2, 69}, {2, 1, 67}, {3, 3, 64} },
+        { {0, 2, 69}, {2, 1, 74}, {3, 2, 74}, {5, 1, 76} },
+        { {0, 2, 77}, {2, 1, 76}, {3, 2, 74}, {5, 1, 72} },
+        { {0, 2, 73}, {2, 1, 76}, {3, 2, 73}, {5, 1, 69} },
+        { {0, 3, 74}, {3, 3, 62} },
+        { {0, 1, 72}, {1, 1, 74}, {2, 1, 72}, {3, 2, 69}, {5, 1, 65} },
+        { {0, 1, 67}, {1, 1, 69}, {2, 1, 67}, {3, 2, 64}, {5, 1, 60} },
+        { {0, 2, 62}, {2, 1, 65}, {3, 2, 69}, {5, 1, 74} },
+        { {0, 3, 73}, {3, 2, 76}, {5, 1, 73} },
+        { {0, 2, 74}, {2, 1, 77}, {3, 2, 74}, {5, 1, 70} },
+        { {0, 2, 72}, {2, 1, 76}, {3, 2, 72}, {5, 1, 67} },
+        { {0, 2, 69}, {2, 1, 73}, {3, 1, 76}, {4, 1, 79}, {5, 1, 76} },
+        { {0, 3, 74}, {3, 2, 69}, {5, 1, 73} },
+    };
+    for (int bar = 0; bar < 16; bar++)
+        for (int k = 0; k < 6; k++) {
+            const Note *nt = &MEL[bar][k];
+            if (nt->m <= 0) continue;
+            fiddle((float)bar * 6 + nt->b, nt->d, nt->m, 0.62f);
+            if (bar >= 8) fiddle((float)bar * 6 + nt->b, nt->d, nt->m - 12, 0.3f);   /* the crew joins in an octave down */
+        }
+    drone(26, 0.4f);
+    wind(1.1f);
+    reverb(0.36f, 1.25f);
+    finish(4);
+}
+
 void music_init(void)
 {
     if (ready) return;
@@ -502,6 +631,7 @@ void music_init(void)
     track_autumn();
     track_hallow();
     track_isle();
+    track_pirate();
 }
 
 const int16_t *music_data(int track) { return MUS[track]; }

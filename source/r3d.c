@@ -16,8 +16,8 @@ static int   flat_on;
 static float flat_l[3];
 
 /* ---- static cache storage ---- */
-#define RC_MAXV 60000
-#define RC_MAXP 6000
+#define RC_MAXV 110000
+#define RC_MAXP 11000
 #define RC_SLOTS 32
 typedef struct { float x, y, r, g, b, f, sw, dx, dy; uint16_t li; uint8_t a, pad; } CVtx;   /* sw: sway in pixels; dx,dy: stretch */
 static CVtx  rcv[RC_MAXV];
@@ -171,12 +171,15 @@ static void cam_finish(void)
     cam.camz = cam.lz + cam.D * cam.c;
 }
 
+static float cfg_lx = 9.5f, cfg_lz = 6.55f, cfg_scale = SCALE;
+void cam_config(float lx, float lz, float scale) { cfg_lx = lx; cfg_lz = lz; cfg_scale = scale; }
+
 void cam_world(float shx, float shy)
 {
-    cam.lx = 9.5f; cam.lz = 6.55f;
+    cam.lx = cfg_lx; cam.lz = cfg_lz;
     cam.cx = VW * 0.5f + shx; cam.cy = VH * 0.5f + 4.0f + shy;
     cam.s = sinf(PITCH); cam.c = cosf(PITCH);
-    cam.D = CAM_D; cam.f = SCALE * CAM_D;
+    cam.D = CAM_D; cam.f = cfg_scale * CAM_D;
     cam.mk = 1.0f;
     cam_finish();
     lt_ui = 0;
@@ -204,10 +207,10 @@ typedef struct { float x, y, z, r, g, b, rad, inv; } Light;
 static Light L[MAXL];
 int lt_count;
 
-#define GX0 (-4)
-#define GZ0 (-4)
-#define NX 28
-#define NZ 22
+#define GX0 (-5)
+#define GZ0 (-5)
+#define NX 38
+#define NZ 29
 #define NY 3
 static const float LY[NY] = { 0.0f, 0.9f, 2.0f };
 static float grid[NY][NZ][NX][3];

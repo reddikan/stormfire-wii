@@ -10,12 +10,13 @@
 
 #include "game.h"
 
-#define MW 19
-#define MH 13
+#define MAXW 27          /* biggest map (level 5) */
+#define MAXH 17
+extern int MW, MH;       /* the current level's map size (set by map_load) */
 
 /* tile kinds */
 enum { TL_PATH, TL_WALL, TL_BLOCK, TL_LAWN, TL_TREE, TL_FIRE, TL_GRAVE };   /* TL_GRAVE: any non-buildable prop tile */
-enum { DECO_GRAVE, DECO_ORRERY, DECO_RUNE };   /* which prop sits on a TL_GRAVE tile (in Tile.color) */
+enum { DECO_GRAVE, DECO_ORRERY, DECO_RUNE, DECO_WRECK, DECO_WATER };   /* which prop sits on a TL_GRAVE tile (in Tile.color) */
 /* block colours (TL_BLOCK) */
 enum { BC_RED, BC_ORANGE, BC_YELLOW, BC_GREEN, BC_MINT, BC_BLUE, BC_PURPLE, BC_CYAN, BC_COUNT };
 
@@ -25,7 +26,7 @@ typedef struct {
 } Tile;
 
 /* towers */
-enum { TW_BLASTER, TW_MORTAR, TW_FROST, TW_TESLA, TW_TYPES };
+enum { TW_BLASTER, TW_MORTAR, TW_FROST, TW_TESLA, TW_PRISM, TW_TYPES };   /* prism: the expensive laser */
 #define TW_MAXLVL 3
 typedef struct {
     const char *name;
@@ -46,6 +47,8 @@ typedef struct {
     int   target;
     float hp, hurt_t;       /* level 3 enemies can smash towers */
     float stun_t;           /* level 4 boss: jammed by a shockwave, can't fire */
+    float lock_t;           /* prism: how long the beam has held its target (damage ramps up) */
+    float acc;              /* prism: damage built up since the last tick */
 } Tower;
 extern const float TOWER_HP[TW_MAXLVL];
 
@@ -54,6 +57,7 @@ enum { EN_CRAWLER, EN_GRUNT, EN_BRUTE, EN_WISP, EN_GOLEM,                    /* 
        EN_BEETLE, EN_SLIME, EN_SLIMELET, EN_FOX, EN_CROW, EN_PUMPKIN, EN_GOURD,  /* level 2 */
        EN_ZOMBIE, EN_GHOST, EN_SKELETON, EN_BAT, EN_BREAKER, EN_GHOULKING,       /* level 3 */
        EN_AUTOMATON, EN_SPRINGER, EN_MOTH, EN_TINKER, EN_SENTINEL, EN_ARCHITECT, /* level 4 */
+       EN_ROWBOAT, EN_SHARK, EN_SKULLPIRATE, EN_PARROT, EN_SHIP, EN_KRAKEN,      /* level 5 */
        EN_TYPES };
 typedef struct {
     const char *name;
@@ -149,12 +153,13 @@ typedef struct { uint8_t type, count, gate; float delay, gap; } Group;
 #define MAX_GROUPS 8
 typedef struct { int n, gates; float hpmul; Group g[MAX_GROUPS]; } WaveDef;   /* gates: how many gates this wave uses */
 
-#define NUM_GATES 6
-enum { ENV_STORM, ENV_AUTUMN, ENV_HALLOW, ENV_ISLAND };
+#define NUM_GATES 8
+enum { ENV_STORM, ENV_AUTUMN, ENV_HALLOW, ENV_ISLAND, ENV_PIRATE };
 typedef struct {
     const char *name;               /* shown on the title screen */
     const char *boss_line;          /* last-wave banner */
-    const char *rows[MH];
+    const char *rows[MAXH];         /* MW characters each; unused rows NULL */
+    int   ngates;
     int   gates[NUM_GATES][2];      /* tiles on the map edge, in the order waves open them */
     const WaveDef *waves;
     int   nwaves;
@@ -164,9 +169,10 @@ typedef struct {
 extern const LevelDef LEVELS[];
 extern const int NUM_LEVELS;
 
-#define FIRE_X 9.5f
-#define FIRE_Z 6.5f
+extern float FIRE_X, FIRE_Z;     /* centre of the fire (or treasure) plaza, set by map_load */
+extern int   FIRE_C, FIRE_R;     /* its middle tile */
 #define FIRE_HP 20
+#define ZOOM_MAX 2.2f
 
 enum { ST_TITLE, ST_PLAY, ST_PAUSE, ST_WIN, ST_LOSE };
 
@@ -180,10 +186,10 @@ struct Game {
     float t;                /* game seconds */
     uint32_t rng;
 
-    Tile  tile[MH][MW];
-    int   dist[MH][MW];     /* steps to the fire along the paths (-1 = not walkable) */
-    int8_t nxt[MH][MW][2];  /* next tile towards the fire */
-    Tower tw[MH][MW];
+    Tile  tile[MAXH][MAXW];
+    int   dist[MAXH][MAXW];     /* steps to the fire along the paths (-1 = not walkable) */
+    int8_t nxt[MAXH][MAXW][2];  /* next tile towards the fire */
+    Tower tw[MAXH][MAXW];
 
     /* player */
     int   gold, fire, cx, cz, sel, fast;
@@ -206,8 +212,9 @@ struct Game {
     int   leaked, kills;
     int   leak_by[EN_TYPES];      /* stats for the test harness */
     float sun;              /* level 4: sunrise progress 0..1, follows the waves */
-    float glitch;           /* screen glitch (mortar impacts) */
     float punch;            /* tiny zoom punch on big hits */
+    float zoom, zoom_t;     /* L2/R2 camera zoom: 1 = whole map, up to ZOOM_MAX */
+    float gust, gust_t, gust_on;  /* level 5: a wind gust (0..1), time to the next one, time it keeps blowing */
     float end_t;
     int   boss;             /* index of the golem, -1 */
 
