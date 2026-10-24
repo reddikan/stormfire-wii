@@ -92,11 +92,11 @@ static void video_init(void)
     GX_SetDither(GX_ENABLE);
     set_view();
 
-    /* vertex format: 2D position (z = 0) + RGBA colour, sent directly */
+    /* vertex format: 2D position + RGBA colour, sent directly (12 bytes a vertex) */
     GX_ClearVtxDesc();
     GX_SetVtxDesc(GX_VA_POS, GX_DIRECT);
     GX_SetVtxDesc(GX_VA_CLR0, GX_DIRECT);
-    GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XYZ, GX_F32, 0);
+    GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XY, GX_F32, 0);
     GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
 
     /* no lighting, no textures: the vertex colour goes straight through */
@@ -138,7 +138,7 @@ static void draw_list(void)
             GX_Begin(GX_TRIANGLES, GX_VTXFMT0, (u16)n);
             for (int k = 0; k < n; k++) {
                 const GVtx *v = &gfx_v[i + k];
-                GX_Position3f32(v->x, v->y, 0.0f);
+                GX_Position2f32(v->x, v->y);
                 GX_Color1u32(v->c);
             }
             GX_End();
@@ -147,14 +147,29 @@ static void draw_list(void)
     }
 }
 
+/* The CPU and the GPU work side by side: the frame just sent is drawn and copied out while the CPU simulates
+ * and builds the next one. Before sending a new frame, wait for the last one to finish and show it at the
+ * next vertical blank. (The triangle list is copied into the FIFO as it is sent, so the CPU is free to
+ * overwrite it straight away.) */
+static int frame_pending;
+
+static void show_previous(void)
+{
+    if (!frame_pending) { VIDEO_WaitVSync(); return; }
+    GX_WaitDrawDone();
+    VIDEO_SetNextFramebuffer(xfb[fbi ^ 1]);
+    VIDEO_Flush();
+    VIDEO_WaitVSync();
+    frame_pending = 0;
+}
+
 static void present(void)
 {
     GX_SetColorUpdate(GX_TRUE);
     GX_CopyDisp(xfb[fbi], GX_TRUE);
-    GX_DrawDone();
-    VIDEO_SetNextFramebuffer(xfb[fbi]);
-    VIDEO_Flush();
-    VIDEO_WaitVSync();
+    GX_SetDrawDone();                  /* signalled when the GPU reaches this point; not waited for here */
+    GX_Flush();
+    frame_pending = 1;
     fbi ^= 1;
 }
 
@@ -182,10 +197,10 @@ static u32 read_input(Input *in)
     if (h & WPAD_CLASSIC_BUTTON_B)     b |= BTN_B;
     if (h & WPAD_CLASSIC_BUTTON_X)     b |= BTN_X;
     if (h & WPAD_CLASSIC_BUTTON_Y)     b |= BTN_Y;
-    if (h & WPAD_CLASSIC_BUTTON_FULL_L) b |= BTN_L;      /* L1 / R1: choose tower */
-    if (h & WPAD_CLASSIC_BUTTON_FULL_R) b |= BTN_R;
-    if (h & WPAD_CLASSIC_BUTTON_ZL)     b |= BTN_ZL;     /* L2 / R2: zoom */
-    if (h & WPAD_CLASSIC_BUTTON_ZR)     b |= BTN_ZR;
+    if (h & WPAD_CLASSIC_BUTTON_FULL_L) b |= BTN_ZL;     /* L / R (L1 / R1): zoom out / in */
+    if (h & WPAD_CLASSIC_BUTTON_FULL_R) b |= BTN_ZR;
+    if (h & WPAD_CLASSIC_BUTTON_ZL)     b |= BTN_L;      /* ZL / ZR (L2 / R2): choose tower */
+    if (h & WPAD_CLASSIC_BUTTON_ZR)     b |= BTN_R;
     if (h & WPAD_CLASSIC_BUTTON_PLUS)  b |= BTN_PLUS;
     if (h & WPAD_CLASSIC_BUTTON_MINUS) b |= X_MINUS;
     if ((h & WPAD_CLASSIC_BUTTON_HOME) || (h & WPAD_BUTTON_HOME)) b |= X_HOME;
@@ -291,6 +306,7 @@ int main(int argc, char **argv)
         }
 
         game_render(game);
+        show_previous();
         draw_list();
         present();
     }

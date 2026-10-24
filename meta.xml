@@ -2,7 +2,7 @@
 <app version="1">
   <name>Stormfire</name>
   <coder>Claude</coder>
-  <version>1.4</version>
+  <version>1.5</version>
   <release_date>20261024000000</release_date>
   <short_description>Stormy low-poly tower defense (Classic Controller)</short_description>
   <long_description>Keep the campfire burning. Enemies march in from every side of the forest; build and upgrade five kinds of towers on the walls and blocks to stop them. Towers you place stay put.
@@ -11,7 +11,7 @@ Level 1, The Storm: a night of rain and lightning, ending with the Storm Golem.
 Level 2, Autumn Gold: golden hour in an autumn forest with armoured beetles, splitting slimes, sprinting foxes, crows and the Pumpkin King.
 Level 3, Hallows Eve: a foggy Halloween dusk where zombies and gravebreakers pound on your towers, ghosts fade out of reach, skeletons get back up, and the Ghoul King rises.
 Level 4, Dawn Isle: an island of old machines at sunrise - the sun climbs as the waves go by - with clockwork automatons, leaping springers, shielding brass moths, repairing tinkers, sentinels and the Architect.
-Level 5, Pirate Storm: a huge map all at sea in a storm. Pirates in rowboats, diving sharks, skull pirates, parrots and cannon-firing pirate ships sail in from eight directions for the treasure on the island in the middle - and then the Kraken rises. Everything rides the swell. Zoom with ZL / ZR.
+Level 5, Pirate Storm: a huge map all at sea in a storm. Pirates in rowboats, diving sharks, skull pirates, parrots and cannon-firing pirate ships sail in from eight directions for the treasure on the island in the middle - and then the Kraken rises. Everything rides the swell, and the pirates shout at you arcade-style. Zoom with L / R.
 
 Every level has its own music.
 
@@ -21,8 +21,8 @@ Controls (Classic Controller):
 Left stick / D-Pad: move the cursor
 A: build / upgrade
 B: sell
-L / R: choose tower
-ZL / ZR: zoom out / in
+ZL / ZR: choose tower
+L / R: zoom out / in
 Y: fast forward
 X: call the next wave early (bonus gold)
 +: pause (music / sound on-off, restart, quit)

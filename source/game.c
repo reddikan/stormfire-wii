@@ -28,6 +28,25 @@ static void snd(Game *g, int id, int pitch, float x)
     g->snd_n++;
 }
 
+/* level 5: a pirate shouts something (after `delay` seconds); `force` jumps the queue and the cooldown */
+static void say(Game *g, int id, float delay, int force)
+{
+    if (g->lv->env != ENV_PIRATE) return;
+    if (!force && (g->voice_cd > 0 || g->voice_id >= 0)) return;
+    g->voice_id = id; g->voice_t = delay; g->voice_cd = 5.0f + delay;
+}
+
+static void update_voice(Game *g, float dt)
+{
+    g->voice_cd -= dt;
+    if (g->voice_id < 0) return;
+    g->voice_t -= dt;
+    if (g->voice_t > 0) return;
+    snd(g, g->voice_id, 120 + (int)(frand(g) * 16), FIRE_X);
+    g->voice_id = -1;
+    g->voice_n++;
+}
+
 int game_pop_sound(Game *g, int *pitch, float *pan)
 {
     if (g->snd_n <= 0) return -1;
@@ -265,6 +284,7 @@ static void leak(Game *g, Enemy *e, int idx)
         sparks(g, FIRE_X, 0.6f, FIRE_Z, 12, 0xFFE080FF, 2.0f);
         snd(g, SFX_SELL, 100 + (int)(frand(g) * 20), e->x);
         snd(g, SFX_SPLASH, 130, e->x);
+        say(g, SFX_V_HARHAR, 0.2f, 0);                                     /* got some! */
     } else {
     for (int i = 0; i < 6; i++) {
         Part *p = part(g, PT_STEAM, FIRE_X + frand2(g) * 0.4f, 0.4f, FIRE_Z + frand2(g) * 0.4f);
@@ -283,6 +303,7 @@ static void leak(Game *g, Enemy *e, int idx)
         g->end_t = 0;
         smoke(g, FIRE_X, 0.4f, FIRE_Z, 14, 0.7f, 0x707888FF);
         snd(g, SFX_LOSE, 128, FIRE_X);
+        say(g, SFX_V_HARHAR, 1.0f, 1);
     }
 }
 
@@ -362,6 +383,7 @@ static void hurt(Game *g, int idx, float dmg)
         }
         ring(g, e->x, 0.04f, e->z, 0.2f, s * 3.4f, 0.8f, 0xB0D0F0A0);
         snd(g, SFX_SPLASH, big ? 100 : 140, e->x);
+        if (e->type == EN_SHIP) say(g, SFX_V_ARR, 0.3f, 0);               /* a ship goes down */
     }
     if (big) g->shake = fmaxf(g->shake, d->boss ? 1.0f : (e->type == EN_BREAKER || e->type == EN_SENTINEL ? 0.55f : 0.32f));
     else g->shake = fmaxf(g->shake, 0.16f);
@@ -662,6 +684,11 @@ static void start_wave(Game *g)
         snprintf(g->banner2, sizeof g->banner2, "HERE COMES THE %s WAVE!!", o);
     }
     snd(g, g->wave == g->lv->nwaves ? SFX_BOSS : SFX_WAVE, 128, FIRE_X);
+    if (g->wave == g->lv->nwaves) say(g, SFX_V_SHIVER, 1.4f, 1);          /* the Kraken! */
+    else {
+        static const int W[4] = { SFX_V_ARR_MATEY, SFX_V_AVAST, SFX_V_PLANK, SFX_V_ARR };
+        say(g, W[g->wave % 4], 1.2f, 1);
+    }
 }
 
 static void update_waves(Game *g, float dt)
@@ -697,6 +724,7 @@ static void update_waves(Game *g, float dt)
         g->state = ST_WIN;
         g->end_t = 0;
         snd(g, SFX_WIN, 128, FIRE_X);
+        say(g, SFX_V_YOHOHO, 1.6f, 1);
         return;
     }
     g->countdown = 14.0f;
@@ -1250,6 +1278,8 @@ static void new_game(Game *g)
     snprintf(g->banner, sizeof g->banner, "WAVE 1/%d", g->lv->nwaves);
     snprintf(g->banner2, sizeof g->banner2, "PREPARE FOR 1ST WAVE!!");
     g->state = ST_PLAY;
+    g->voice_id = -1; g->voice_cd = 0;
+    say(g, SFX_V_YOHOHO, 0.9f, 1);
 }
 
 /* switch to a level and show it behind the title screen (with a few towers on it) */
@@ -1270,6 +1300,7 @@ void game_set_level(Game *g, int level)
     if (g->lv->env == ENV_STORM || g->lv->env == ENV_PIRATE) for (int i = 0; i < MAX_DROP; i++) reset_drop(g, &g->drop[i], 0);
     else for (int i = 0; i < NUM_LEAVES; i++) reset_leaf(g, &g->drop[i], 0);
     g->gust = 0; g->gust_on = 0; g->gust_t = 4.0f;
+    g->voice_id = -1; g->voice_cd = 0;
     g->state = ST_TITLE;
     g->storm_t = 1.5f;
     g->flash_t = 10.0f;
@@ -1392,7 +1423,7 @@ static void play_input(Game *g, const Input *in, float dt)
         g->countdown = 0;
         start_wave(g);
     }
-    if (in->held & BTN_ZR) g->zoom_t += dt * 1.6f;          /* R2: zoom in on the action, L2: back out */
+    if (in->held & BTN_ZR) g->zoom_t += dt * 1.6f;          /* R: zoom in on the action, L: back out */
     if (in->held & BTN_ZL) g->zoom_t -= dt * 1.6f;
     g->zoom_t = clampf(g->zoom_t, 1.0f, ZOOM_MAX);
     if (in->pressed & BTN_PLUS) { g->state = ST_PAUSE; g->menu = 0; snd(g, SFX_PAUSE, 128, FIRE_X); }
@@ -1419,6 +1450,7 @@ void game_update(Game *g, const Input *in, float dt)
             g->sun += (want - g->sun) * clampf(dt * 0.25f, 0, 1);
         }
         update_storm(g, dt);
+        update_voice(g, dt);
         update_rain(g, dt);
         update_fire(g, dt);
         update_particles(g, dt);

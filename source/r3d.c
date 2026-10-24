@@ -5,6 +5,7 @@
 #include "gfx.h"
 
 #include <math.h>
+#include "fastmath.h"
 #include <string.h>
 
 Cam cam;
@@ -19,11 +20,14 @@ static float flat_l[3];
 #define RC_MAXV 110000
 #define RC_MAXP 11000
 #define RC_SLOTS 32
-typedef struct { float x, y, r, g, b, f, sw, dx, dy; uint16_t li; uint8_t a, pad; } CVtx;   /* sw: sway in pixels; dx,dy: stretch */
+typedef struct { float x, y, sw, dx, dy; uint8_t r, g, b, a; uint16_t f, li; } CVtx;   /* sw: sway in pixels; dx,dy: stretch; f: face light x256 */
 static CVtx  rcv[RC_MAXV];
 static float rcp[RC_MAXP][3];          /* light sample points */
 static float rcl[RC_MAXP][3];          /* their light this frame */
+static int   rcli[RC_MAXP][3];         /* the same, x256, for the integer shading in rc_draw */
 static float rcs[RC_MAXP];             /* their sway this frame (-1..1, times the wind) */
+static float rcph[RC_MAXP][4];         /* sin / cos of each point's two sway phase offsets */
+static int   rc_full = 1, rc_frame;    /* relight every point next frame (after a rebuild); frame parity */
 static float sw_amp, sw_y0, sw_y1 = 1;  /* sway being recorded: world units at the top, from y0 to y1 */
 static float rc_stretch = 1.0f;          /* how long the stretchable shadows are this frame */
 static float st_dx, st_dy;               /* stretch of the vertex being recorded */
@@ -60,7 +64,16 @@ void rc_begin(void)
     for (int i = 0; i < RC_SLOTS; i++) rc_start[i] = rc_count[i] = 0;
 }
 void rc_slot(int slot) { rc_cur_slot = slot; rc_start[slot] = rc_verts; rc_count[slot] = 0; }
-void rc_end(void) { rc_recording = 0; }
+void rc_end(void)
+{
+    rc_recording = 0;
+    for (int i = 0; i < rc_np; i++) {
+        float ph = (float)i;
+        rcph[i][0] = sinf(ph * 1.7f); rcph[i][1] = cosf(ph * 1.7f);
+        rcph[i][2] = sinf(ph * 0.9f); rcph[i][3] = cosf(ph * 0.9f);
+    }
+    rc_full = 1;
+}
 
 void rc_sway(float amp, float y0, float y1) { sw_amp = amp; sw_y0 = y0; sw_y1 = y1 > y0 + 0.01f ? y1 : y0 + 0.01f; }
 static void rc_vert(float sx, float sy, uint32_t c, float f, int li, float sw);
@@ -103,18 +116,26 @@ static void rc_vert(float sx, float sy, uint32_t c, float f, int li, float sw)
     if (rc_verts >= RC_MAXV || rc_cur_slot < 0) return;
     CVtx *v = &rcv[rc_verts++];
     v->x = sx; v->y = sy;
-    v->r = (float)(c >> 24); v->g = (float)((c >> 16) & 255); v->b = (float)((c >> 8) & 255); v->a = (uint8_t)(c & 255);
-    v->f = f; v->li = (uint16_t)li; v->sw = sw; v->dx = st_dx; v->dy = st_dy;
+    v->r = (uint8_t)(c >> 24); v->g = (uint8_t)(c >> 16); v->b = (uint8_t)(c >> 8); v->a = (uint8_t)(c & 255);
+    int fi = (int)(f * 256.0f + 0.5f);
+    v->f = (uint16_t)(fi < 0 ? 0 : fi > 65535 ? 65535 : fi); v->li = (uint16_t)li; v->sw = sw; v->dx = st_dx; v->dy = st_dy;
     rc_count[rc_cur_slot]++;
 }
 
 void rc_relight(float t, float wind)
 {
-    for (int i = 0; i < rc_np; i++) {
+    /* the light changes smoothly, so each point is re-sampled every other frame (half of them each frame) */
+    int start = rc_full ? 0 : (rc_frame & 1), step = rc_full ? 1 : 2;
+    rc_full = 0; rc_frame++;
+    for (int i = start; i < rc_np; i += step) {
         lt_at(rcp[i][0], rcp[i][1], rcp[i][2], rcl[i]);
-        float ph = (float)i;
-        rcs[i] = wind * (0.65f * sinf(t * 1.1f + ph * 1.7f) + 0.35f * sinf(t * 2.3f + ph * 0.9f));
+        rcli[i][0] = (int)(rcl[i][0] * 256.0f); rcli[i][1] = (int)(rcl[i][1] * 256.0f); rcli[i][2] = (int)(rcl[i][2] * 256.0f);
     }
+    /* sway: sin(a + b) = sin a cos b + cos a sin b, with the per-point parts worked out once */
+    float s1 = sinf(t * 1.1f) * 0.65f * wind, c1 = cosf(t * 1.1f) * 0.65f * wind;
+    float s2 = sinf(t * 2.3f) * 0.35f * wind, c2 = cosf(t * 2.3f) * 0.35f * wind;
+    for (int i = 0; i < rc_np; i++)
+        rcs[i] = s1 * rcph[i][1] + c1 * rcph[i][0] + s2 * rcph[i][3] + c2 * rcph[i][2];
 }
 
 void rc_draw(int slot, float shx, float shy)
@@ -124,14 +145,15 @@ void rc_draw(int slot, float shx, float shy)
     const CVtx *v = &rcv[rc_start[slot]];
     GVtx *o = &gfx_v[gfx_nv];
     for (int i = 0; i < n; i++, v++, o++) {
-        const float *l = rcl[v->li];
-        float mr = l[0] * v->f, mg = l[1] * v->f, mb = l[2] * v->f;
-        float r = v->r * mr, g = v->g * mg, b = v->b * mb;
-        if (mr > 1.0f) r += (mr - 1.0f) * 40.0f;
-        if (mg > 1.0f) g += (mg - 1.0f) * 40.0f;
-        if (mb > 1.0f) b += (mb - 1.0f) * 40.0f;
-        int ir = (int)r, ig = (int)g, ib = (int)b;
+        /* integer shading: colour x (light x face), with very bright light washing a little towards white */
+        const int *l = rcli[v->li];
+        int f = v->f, mr = (l[0] * f) >> 8, mg = (l[1] * f) >> 8, mb = (l[2] * f) >> 8;
+        int ir = (v->r * mr) >> 8, ig = (v->g * mg) >> 8, ib = (v->b * mb) >> 8;
+        if (mr > 256) ir += ((mr - 256) * 14) >> 8;
+        if (mg > 256) ig += ((mg - 256) * 14) >> 8;
+        if (mb > 256) ib += ((mb - 256) * 14) >> 8;
         if (ir > 255) ir = 255; if (ig > 255) ig = 255; if (ib > 255) ib = 255;
+        if (ir < 0) ir = 0; if (ig < 0) ig = 0; if (ib < 0) ib = 0;
         o->x = v->x + shx + v->sw * rcs[v->li] + v->dx * rc_stretch; o->y = v->y + shy + v->dy * rc_stretch;
         o->c = ((uint32_t)ir << 24) | ((uint32_t)ig << 16) | ((uint32_t)ib << 8) | v->a;
     }
@@ -153,7 +175,7 @@ static uint32_t shade_l(uint32_t base, const float *l, float face)
     for (int ch = 0; ch < 3; ch++) {
         float m = l[ch] * face;
         float v = (float)((base >> (24 - 8 * ch)) & 255) * m;
-        if (m > 1.0f) v += (m - 1.0f) * 40.0f;
+        if (m > 1.0f) v += (m - 1.0f) * 14.0f;
         out[ch] = (int)v;
     }
     return RGBA(out[0], out[1], out[2], (int)((float)(base & 255) * r_alpha));
@@ -285,6 +307,14 @@ void lt_build(float flash, float amb)
                     o[0] += l->r * k; o[1] += l->g * k; o[2] += l->b * k;
                 }
             }
+        }
+    }
+    /* soft shoulder: lots of lights in one place (a cluster of towers) level off instead of burning to white */
+    if (lt_count > 0) {
+        float *o = &grid[0][0][0][0];
+        for (int i = 0; i < NY * NZ * NX * 3; i++) {
+            float d = o[i] - 0.85f;
+            if (d > 0) o[i] = 0.85f + d / (1.0f + d * 1.6f);
         }
     }
 }
@@ -440,8 +470,11 @@ void r_stick(float x0, float y0, float z0, float x1, float y1, float z1, float w
     r_face(4, (const float (*)[3])p, vx, vy + 0.3f, vz, c);              /* lit like a mostly-front face */
 }
 
+int r_lod;     /* 1: fewer sides on round shapes (small on screen) */
+
 void r_prism(float x, float y0, float z, float rb, float rt, float y1, int n, float rot, uint32_t top, uint32_t side)
 {
+    if (r_lod && n >= 7) n = (n * 2 + 2) / 3;
     if (n < 3) n = 3;
     if (n > 24) n = 24;
     static float tab[25][24][2];
@@ -491,10 +524,18 @@ void r_prism(float x, float y0, float z, float rb, float rt, float y1, int n, fl
 void r_crystal(float x, float y, float z, float r, float up, float down, int n, float rot, uint32_t c)
 {
     if (n > 8) n = 8;
+    if (r_lod && n >= 6) n -= 2;
+    if (n < 3) n = 3;
+    static float tab[9][8][2];
+    static int tab_ok[9];
+    if (!tab_ok[n]) {
+        for (int i = 0; i < n; i++) { tab[n][i][0] = cosf(6.2831853f * (float)i / (float)n); tab[n][i][1] = sinf(6.2831853f * (float)i / (float)n); }
+        tab_ok[n] = 1;
+    }
+    float cr = cosf(rot) * r, sr = sinf(rot) * r;
     float e[8][3];
     for (int i = 0; i < n; i++) {
-        float a = rot + 6.2831853f * (float)i / (float)n;
-        e[i][0] = x + cosf(a) * r; e[i][1] = y; e[i][2] = z + sinf(a) * r;
+        e[i][0] = x + tab[n][i][0] * cr - tab[n][i][1] * sr; e[i][1] = y; e[i][2] = z + tab[n][i][1] * cr + tab[n][i][0] * sr;
     }
     for (int i = 0; i < n; i++) {
         int j = (i + 1) % n;
@@ -581,8 +622,12 @@ void r_gquad(float x0, float z0, float x1, float z1, float y, uint32_t c)
     gfx_quad4(a[0][0], a[0][1], c, a[1][0], a[1][1], c, a[2][0], a[2][1], c, a[3][0], a[3][1], c);
 }
 
+float r_glow_k = 1.0f;
+static inline uint32_t glow_a(uint32_t c) { return r_glow_k >= 1.0f ? c : (c & 0xFFFFFF00u) | (uint32_t)((float)(c & 255) * r_glow_k); }
+
 void r_glow(float x, float y, float z, float rad, uint32_t c)
 {
+    c = glow_a(c);
     float sx, sy;
     proj(x, y, z, &sx, &sy);
     float pr = rad * proj_scale(y, z);
@@ -591,6 +636,7 @@ void r_glow(float x, float y, float z, float rad, uint32_t c)
 
 void r_glow_cheap(float x, float y, float z, float rad, uint32_t c)
 {
+    c = glow_a(c);
     float sx, sy;
     proj(x, y, z, &sx, &sy);
     gfx_glow_cheap(sx, sy, rad * proj_scale(y, z), c);
@@ -606,6 +652,7 @@ void r_line(float x0, float y0, float z0, float x1, float y1, float z1, float w,
 
 void r_glowline(float x0, float y0, float z0, float x1, float y1, float z1, float w, uint32_t c)
 {
+    c = glow_a(c);
     float ax, ay, bx, by;
     proj(x0, y0, z0, &ax, &ay);
     proj(x1, y1, z1, &bx, &by);

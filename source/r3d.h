@@ -109,6 +109,8 @@ void r_ground_quad(float x0, float z0, float x1, float z1, uint32_t c, const flo
 void r_gdisc(float x, float z, float y, float rad, int n, uint32_t cin, uint32_t cout);
 void r_gring(float x, float z, float y, float rad, float thick, int n, uint32_t c);
 void r_gquad(float x0, float z0, float x1, float z1, float y, uint32_t c);
+extern int r_lod;         /* 1: draw round shapes with fewer sides (they are small on screen) */
+extern float r_glow_k;    /* scales the strength of r_glow / r_glow_cheap / r_glowline (weapon glows are toned down) */
 void r_glow(float x, float y, float z, float rad, uint32_t c);           /* rad in world units */
 void r_glow_cheap(float x, float y, float z, float rad, uint32_t c);
 void r_line(float x0, float y0, float z0, float x1, float y1, float z1, float w, uint32_t c0, uint32_t c1);

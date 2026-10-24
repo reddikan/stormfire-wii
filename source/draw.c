@@ -12,6 +12,7 @@
 #include "r3d.h"
 
 #include <math.h>
+#include "fastmath.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -154,7 +155,7 @@ static void build_lights(void)
             const Tower *w = &G->tw[r][c];
             if (w->type >= 0) {
                 uint32_t gc = TOWERS[w->type].glow;
-                float k = (0.35f + 0.1f * (float)w->lvl + w->pulse * 0.6f) * lk;
+                float k = (0.2f + 0.05f * (float)w->lvl + w->pulse * 0.35f) * lk;
                 lt_add((float)c + 0.5f, t->h + 1.0f, (float)r + 0.5f, (float)(gc >> 24) / 255.0f * k,
                        (float)((gc >> 16) & 255) / 255.0f * k, (float)((gc >> 8) & 255) / 255.0f * k, 1.7f + 0.2f * (float)w->lvl);
             }
@@ -1194,11 +1195,12 @@ static void tower_model(int type, int lvl, float x, float h, float z, float ang,
         r_unlit = 0;
         for (int k = 0; k < 2; k++) {
             float rr = (0.24f + 0.06f * (float)k) * s, sp = (k ? -1.3f : 1.0f) * anim * (1.0f + tw_charge * 3.0f);
+            float tl = 0.5f + 0.3f * (float)k, st = sinf(tl), ct = cosf(tl), cs = cosf(sp), ss = sinf(sp);
             float ox = 0, oy = 0, oz = 0;
             for (int i = 0; i <= 12; i++) {
-                float a2 = (float)i / 12.0f * 6.2832f, tl = 0.5f + 0.3f * (float)k;
-                float lx = cosf(a2) * rr, ly = sinf(a2) * rr * sinf(tl), lz = sinf(a2) * rr * cosf(tl);
-                float px = x + lx * cosf(sp) - lz * sinf(sp), pyy = py + ly, pz = z + lx * sinf(sp) + lz * cosf(sp);
+                float a2 = (float)i / 12.0f * 6.2832f, c2 = cosf(a2), s2 = sinf(a2);
+                float lx = c2 * rr, ly = s2 * rr * st, lz = s2 * rr * ct;
+                float px = x + lx * cs - lz * ss, pyy = py + ly, pz = z + lx * ss + lz * cs;
                 if (i) r_line(ox, oy, oz, px, pyy, pz, 2.0f, 0xC8A0F0FF, 0xC8A0F0FF);
                 ox = px; oy = pyy; oz = pz;
             }
@@ -1267,7 +1269,9 @@ static void draw_tower_at(int c, int r)
     if (t->stun_t > 0 && fmodf(T * 12.0f, 1.0f) < 0.3f) r_unlit = 1;                  /* jammed: flickers */
     tw_charge = t->type == TW_TESLA && t->target >= 0 ? clampf(1.0f - t->cd * TOWERS[t->type].rate[t->lvl], 0, 1) : 0.0f;
     if (t->type == TW_PRISM) tw_charge = t->target >= 0 ? clampf(t->lock_t / 2.5f, 0, 1) : 0.0f;
+    r_glow_k = 0.5f;
     tower_model(t->type, t->lvl, x + wob, tl->h, z, t->ang, t->anim, t->recoil, t->pulse, t->built, 1);
+    r_glow_k = 1.0f;
     tw_charge = 0;
     r_unlit = 0;
     r_light_off();
@@ -2326,7 +2330,14 @@ static void draw_world(void)
 /* ------------------------------------------------------------------ */
 /* effects                                                             */
 /* ------------------------------------------------------------------ */
+static void draw_effects_inner(void);
 static void draw_effects(void)
+{
+    r_glow_k = 0.6f;                     /* weapon flashes, beams and bolts: bright, but not blinding when towers bunch up */
+    draw_effects_inner();
+    r_glow_k = 1.0f;
+}
+static void draw_effects_inner(void)
 {
     /* solid bits first */
     for (int i = 0; i < MAX_PT; i++) {
@@ -2427,7 +2438,7 @@ static void draw_effects(void)
             float x0 = (float)c + 0.5f, y0 = h + 0.79f * TOWER_K, z0 = (float)r + 0.5f;
             float x1 = e->x, y1 = e->y + ENEMIES[e->type].size * 0.7f * ENEMY_K, z1 = e->z;
             float flick = 0.85f + 0.15f * sinf(T * 50.0f + (float)c);
-            uint32_t outer = col_mix(0xFF60F0FF, 0xFFC8FFFF, k), inner = col_mix(0xFFB0FFFF, 0xFFFFFFFF, k);
+            uint32_t outer = col_mix(0xFF60F0FF, 0xFFA8FFFF, k), inner = col_mix(0xFFA0FFFF, 0xFFE0FFFF, k);
             r_glowline(x0, y0, z0, x1, y1, z1, (8.0f + 14.0f * k) * flick, col_a(outer, 0.55f));
             r_line(x0, y0, z0, x1, y1, z1, 1.5f + 2.5f * k, inner, inner);
             r_glow(x1, y1, z1, 0.25f + 0.3f * k, col_a(outer, 0.8f));
@@ -2439,6 +2450,7 @@ static void draw_effects(void)
         float k = 1.0f - a->t / a->life;
         if (a->storm) k = k * (0.5f + 0.5f * (sinf(a->t * 70.0f) > -0.3f));
         float w = a->storm ? 5.0f : 2.4f;
+        r_glow_k = a->storm ? 1.0f : 0.6f;              /* the storm's own lightning stays blinding */
         for (int j = 0; j + 1 < a->n; j++) {
             r_glowline(a->p[j][0], a->p[j][1], a->p[j][2], a->p[j + 1][0], a->p[j + 1][1], a->p[j + 1][2], w * 5.0f, col_a(a->c, k * 0.45f));
             r_line(a->p[j][0], a->p[j][1], a->p[j][2], a->p[j + 1][0], a->p[j + 1][1], a->p[j + 1][2], w, col_a(0xFFFFFFFF, k), col_a(0xFFFFFFFF, k));
@@ -2870,8 +2882,8 @@ static void draw_hud(void)
         coin_icon(cx + 12, cy + lift + 60, 4.5f);
         gfx_text_s(buf, cx + 20, cy + lift + 55, 1.5f, col_a(afford ? 0xFFE070FF : 0xFF6050FF, cfade));
     }
-    gfx_text_s("L", 14 + TW_TYPES * 62, cy + 14, 1.5f, col_a(0x8090B0FF, cfade));
-    gfx_text_s("R", 14 + TW_TYPES * 62, cy + 40, 1.5f, col_a(0x8090B0FF, cfade));
+    gfx_text_s("ZL", 14 + TW_TYPES * 62, cy + 14, 1.5f, col_a(0x8090B0FF, cfade));
+    gfx_text_s("ZR", 14 + TW_TYPES * 62, cy + 40, 1.5f, col_a(0x8090B0FF, cfade));
     gfx_text_s(TOWERS[G->sel].name, 14, cy - 22, 1.8f, col_a(TOWERS[G->sel].glow, cfade));
 
     /* info panel for the tile under the cursor */
@@ -2914,7 +2926,7 @@ static void draw_hud(void)
     }
 
     /* controls reminder */
-    gfx_text_sc("Y: SPEED   ZL/ZR: ZOOM   +: PAUSE", VW * 0.5f + 20, VH - 14, 1.2f, 0x8C98B4C0);
+    gfx_text_sc("Y: SPEED   L/R: ZOOM   +: PAUSE", VW * 0.5f + 20, VH - 14, 1.2f, 0x8C98B4C0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2932,14 +2944,7 @@ static void fire_text(const char *s, float cx, float y, float px)
     gfx_text_c(s, cx + px * 0.5f, y + px * 0.6f, px, 0x401008E0);
     /* two passes: orange body with a yellow upper half */
     gfx_text_c(s, cx, y, px, 0xFF8030FF);
-    for (int i = 0; s[i]; i++) {
-        const uint8_t *g = gfx_glyph(s[i]);
-        if (!g) continue;
-        float x = cx - w * 0.5f + (float)i * 6.0f * px;
-        for (int r = 0; r < 3; r++)
-            for (int b = 0; b < 5; b++)
-                if (g[r] & (0x10 >> b)) gfx_rect(x + (float)b * px, y + (float)r * px, px, px, 0xFFD878FF);
-    }
+    gfx_text_top(s, cx - w * 0.5f, y, px, 0xFFD878FF, 2);
 }
 
 static void draw_title(void)
@@ -2958,7 +2963,7 @@ static void draw_title(void)
     gfx_text_s(">", VW * 0.5f + lw * 0.5f + 24 + nudge, 226, 2.4f, 0xFFFFFFC0);
     if (fmodf(T, 1.2f) < 0.85f) gfx_text_sc("PRESS A TO START", VW * 0.5f, 272, 2.6f, 0xFFFFFFFF);
     panel(VW * 0.5f - 230, 308, 460, 140, 0x0A0E18C0);
-    static const char *L1[] = { "STICK / D-PAD", "A", "B", "L / R", "Y", "X", "ZL / ZR", "+" };
+    static const char *L1[] = { "STICK / D-PAD", "A", "B", "ZL / ZR", "Y", "X", "L / R", "+" };
     static const char *L2[] = { "MOVE THE CURSOR", "BUILD / UPGRADE", "SELL", "CHOOSE TOWER", "FAST FORWARD", "CALL NEXT WAVE EARLY", "ZOOM OUT / IN", "PAUSE" };
     for (int i = 0; i < 8; i++) {
         float y = 318 + (float)(i % 4) * 32, x = VW * 0.5f - 214 + (float)(i / 4) * 228;
@@ -3092,7 +3097,9 @@ void game_render(const Game *g)
     else gfx_rect_v(0, 0, VW, VH, 0x0A1220FF, 0x05080EFF);
 
     draw_ground();        dbg_nv[0] = gfx_nv;
+    r_lod = g->zoom < 1.4f && MW > 19;      /* the big map is drawn small: round shapes need fewer sides */
     draw_world();         dbg_nv[1] = gfx_nv;
+    r_lod = 0;
     if (g->state == ST_PLAY) draw_cursor();
     draw_effects();       dbg_nv[2] = gfx_nv;
     draw_rain();          dbg_nv[3] = gfx_nv;
@@ -3105,8 +3112,8 @@ void game_render(const Game *g)
     gfx_fx(0, 0);
     switch (g->state) {
     case ST_TITLE: draw_title(); break;
-    case ST_PLAY: draw_hud(); break;
-    case ST_PAUSE: draw_hud(); draw_pause(); break;
+    case ST_PLAY: r_lod = 1; draw_hud(); r_lod = 0; break;               /* the tower cards are small */
+    case ST_PAUSE: r_lod = 1; draw_hud(); r_lod = 0; draw_pause(); break;
     case ST_WIN: case ST_LOSE: draw_end(); break;
     }
 }

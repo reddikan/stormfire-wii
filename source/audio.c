@@ -6,6 +6,7 @@
  * rolling thunder and a sharp lightning crack.
  */
 #include "audio.h"
+#include "speech.h"
 
 #include <math.h>
 #include <string.h>
@@ -30,7 +31,8 @@ static const uint8_t VOL[SFX_COUNT] = {
     /* POP */ 120,     /* CRUNCH */ 190, /* BUILD */ 190,  /* UPGRADE */ 200, /* SELL */ 170,   /* ERROR */ 140,
     /* MOVE */ 60,     /* SELECT */ 120, /* WAVE */ 200,   /* CLEAR */ 200,  /* HISS */ 200,   /* THUNDER */ 255,
     /* CRACK */ 230,   /* BOSS */ 240,   /* WIN */ 220,    /* LOSE */ 220,   /* PAUSE */ 120,  /* START */ 200,
-    /* COIN */ 170,    /* GUST */ 150,   /* CANNON */ 220, /* SPLASH */ 160
+    /* COIN */ 170,    /* GUST */ 150,   /* CANNON */ 220, /* SPLASH */ 160,
+    /* voices */ 235, 235, 235, 230, 235, 235, 235
 };
 
 /* ------------------------------------------------------------------ */
@@ -217,6 +219,25 @@ static void bell(float t, float f, float vol, float tau)
 }
 
 
+/* a pirate shouting through an old arcade speech chip: formant speech, then band-limited, sample-and-held at
+ * ~10 kHz and quantised a little for that crunchy cabinet sound */
+static void voice(int id, const char *phrase, float pitch, float rate, float growl)
+{
+    begin();
+    int n = speech_render(phrase, pitch, rate, growl, mixbuf, MAXLEN - 2000, SR);
+    float l1 = 0, l2 = 0, held = 0, peak = 1e-6f, prev = 0;
+    for (int i = 0; i < n; i++) { float x = mixbuf[i]; mixbuf[i] = x - 0.88f * prev; prev = x; }   /* brighter, buzzier: easier to make out */
+    for (int i = 0; i < n; i++) if (fabsf(mixbuf[i]) > peak) peak = fabsf(mixbuf[i]);
+    for (int i = 0; i < n; i++) {
+        float x = mixbuf[i] / peak;
+        l1 += (x - l1) * 0.5f; l2 += (l1 - l2) * 0.5f;            /* ~5 kHz low-pass */
+        if ((i & 1) == 0) held = floorf(l2 * 400.0f + 0.5f) / 400.0f;  /* 16 kHz, ~9.5 bits */
+        mixbuf[i] = held;
+    }
+    mixend = n;
+    finish_fx(id, 0.12f, 0.2f);
+}
+
 void audio_init(void)
 {
     if (ready) return;
@@ -376,6 +397,15 @@ void audio_init(void)
     noise(0.02f, 0.5f, 3000, 400, 0.8f, 0.7f, 0.001f, 0.12f, F_LP);
     tone(0.0f, 0.3f, 180, 50, 0.6f, 0.001f, 0.1f, W_SIN, 0, 0);
     finish_fx(SFX_CRACK, 0.3f, 0.5f);
+
+    /* --- pirate voices --- */
+    voice(SFX_V_ARR_MATEY, "AA^ RR _ M EY^ T IY", 1.0f, 1.0f, 0.8f);
+    voice(SFX_V_SHIVER,    "SH IH^ V ER M IY T IH^ M B ER Z", 1.0f, 1.0f, 0.5f);
+    voice(SFX_V_YOHOHO,    "Y OW^ _ HH OW^ _ HH OW^", 1.15f, 1.0f, 0.4f);
+    voice(SFX_V_HARHAR,    "HH AA^ R _ HH AA^ R _ HH AA^ RR", 1.05f, 0.75f, 0.7f);
+    voice(SFX_V_PLANK,     "W AO^ K DH AX P L AE^ NG K", 1.0f, 1.0f, 0.5f);
+    voice(SFX_V_ARR,       "AA^ RR", 0.95f, 1.1f, 1.0f);
+    voice(SFX_V_AVAST,     "AX V AE^ S T _ Y IY", 1.0f, 1.0f, 0.5f);
 
     /* --- the sea --- */
     begin();                                                         /* wind gust: a swelling, whistling howl */

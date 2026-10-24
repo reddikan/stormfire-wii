@@ -8,7 +8,7 @@ set -e
 cd "$(dirname "$0")/.."
 mkdir -p tools/out/reel
 cc -O2 -std=gnu11 -Wall -Wextra -Wno-unused-parameter -Wno-misleading-indentation \
-   source/game.c source/draw.c source/map.c source/r3d.c source/gfx.c source/audio.c source/music.c tools/test.c -lm -o tools/out/stest
+   source/game.c source/draw.c source/map.c source/r3d.c source/gfx.c source/audio.c source/music.c source/speech.c tools/test.c -lm -o tools/out/stest
 tools/out/stest tools/out ${1:-all} $2 $3
 python3 -c "
 import glob, os

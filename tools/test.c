@@ -19,6 +19,7 @@
 #include "../source/game_int.h"
 #include "../source/gfx.h"
 #include "../source/music.h"
+#include "../source/audio.h"
 
 #define OW 1280
 #define OH 720
@@ -400,8 +401,8 @@ static void perf(void)
     static const int X[][3] = { {4, 2, TW_BLASTER}, {13, 2, TW_TESLA}, {17, 3, TW_FROST}, {1, 4, TW_MORTAR}, {11, 7, TW_TESLA}, {5, 7, TW_BLASTER}, {16, 9, TW_MORTAR}, {3, 9, TW_BLASTER}, {11, 10, TW_FROST} };
     G->gold = 99999;
     if (LEVEL == 0) for (unsigned i = 0; i < sizeof X / sizeof X[0]; i++) press_at(G, X[i][0], X[i][1], X[i][2], BTN_A);
-    else auto_build(G, 9);
-    G->wave = 9; G->countdown = 0;
+    else auto_build(G, LEVEL == NUM_LEVELS - 1 ? 30 : 9);     /* level 5: a crowded late game */
+    G->wave = LEVEL == NUM_LEVELS - 1 ? 12 : 9; G->countdown = 0;
     double tu = 0, tr = 0;
     int maxv = 0, maxseg = 0, frames = 0, maxen = 0;
     double worst = 0, worst_u = 0;
@@ -527,6 +528,26 @@ int main(int argc, char **argv)
     const char *what = argc > 2 ? argv[2] : "all";
     int only = argc > 3 ? atoi(argv[3]) - 1 : -1;
     verbose = argc > 4 ? (int)strlen(argv[4]) : 0;
+    if (!strcmp(what, "voices")) {
+        /* the pirate voices as .wav files, to listen to */
+        audio_init();
+        static const char *NM[] = { "arr_matey", "shiver", "yohoho", "harhar", "plank", "arr", "avast" };
+        for (int v = 0; v < 7; v++) {
+            int id = SFX_V_ARR_MATEY + v, n = audio_len(id), sr = SFX_RATE, br = SFX_RATE * 2, ds = n * 2, cs = 36 + ds, fmt = 16;
+            short one = 1, ba = 2, bits = 16;
+            char path[512];
+            snprintf(path, sizeof path, "%s/voice_%s.wav", outdir, NM[v]);
+            FILE *f = fopen(path, "wb");
+            if (!f) continue;
+            fwrite("RIFF", 1, 4, f); fwrite(&cs, 4, 1, f); fwrite("WAVEfmt ", 1, 8, f); fwrite(&fmt, 4, 1, f);
+            fwrite(&one, 2, 1, f); fwrite(&one, 2, 1, f); fwrite(&sr, 4, 1, f); fwrite(&br, 4, 1, f); fwrite(&ba, 2, 1, f); fwrite(&bits, 2, 1, f);
+            fwrite("data", 1, 4, f); fwrite(&ds, 4, 1, f);
+            fwrite(audio_data(id), 2, (size_t)n, f);
+            fclose(f);
+            printf("  %s: %.2f s\n", path, (float)n / (float)SFX_RATE);
+        }
+        return 0;
+    }
     for (LEVEL = 0; LEVEL < NUM_LEVELS; LEVEL++) {
         if (only >= 0 && LEVEL != only) continue;
         if (!strcmp(what, "reel")) { reel(); continue; }

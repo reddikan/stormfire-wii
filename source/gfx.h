@@ -78,7 +78,7 @@ void gfx_glowline(float x0, float y0, float x1, float y1, float w, uint32_t c); 
 void gfx_capsule(float x, float y, float dx, float dy, float len, float w, uint32_t c); /* tapered streak */
 
 /* 5x7 pixel font: uppercase, digits and a little punctuation */
-const uint8_t *gfx_glyph(char ch);                 /* 7 rows of 5 bits, or NULL */
+void  gfx_text_top(const char *s, float x, float y, float px, uint32_t c, int rows);   /* just the top rows (two-tone text) */
 float gfx_text_width(const char *s, float px);
 void  gfx_text(const char *s, float x, float y, float px, uint32_t c);            /* top-left anchored */
 void  gfx_text_c(const char *s, float cx, float y, float px, uint32_t c);         /* centred */

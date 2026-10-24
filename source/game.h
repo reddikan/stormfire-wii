@@ -22,11 +22,11 @@ enum {
     BTN_B     = 1 << 5,     /* sell                     */
     BTN_X     = 1 << 6,     /* call the next wave early */
     BTN_Y     = 1 << 7,     /* fast forward on / off    */
-    BTN_L     = 1 << 8,     /* previous tower type      */
-    BTN_R     = 1 << 9,     /* next tower type          */
+    BTN_L     = 1 << 8,     /* previous tower (ZL / L2) */
+    BTN_R     = 1 << 9,     /* next tower (ZR / R2)     */
     BTN_PLUS  = 1 << 10,    /* pause                    */
-    BTN_ZL    = 1 << 11,    /* zoom out (L2)            */
-    BTN_ZR    = 1 << 12     /* zoom in  (R2)            */
+    BTN_ZL    = 1 << 11,    /* zoom out (L / L1 button) */
+    BTN_ZR    = 1 << 12     /* zoom in  (R / R1 button) */
 };
 
 typedef struct {

@@ -214,6 +214,8 @@ struct Game {
     float sun;              /* level 4: sunrise progress 0..1, follows the waves */
     float punch;            /* tiny zoom punch on big hits */
     float zoom, zoom_t;     /* L2/R2 camera zoom: 1 = whole map, up to ZOOM_MAX */
+    int   voice_id, voice_n;   /* level 5: a pirate shout waiting to play, and how many have played */
+    float voice_t, voice_cd;   /* its delay, and the gap before another may play */
     float gust, gust_t, gust_on;  /* level 5: a wind gust (0..1), time to the next one, time it keeps blowing */
     float end_t;
     int   boss;             /* index of the golem, -1 */

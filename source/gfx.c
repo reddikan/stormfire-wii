@@ -248,14 +248,14 @@ void gfx_glow(float cx, float cy, float r, uint32_t c)
 {
     if (r < 1.0f || (c & 255) == 0) return;
     if (cx + r < -20 || cx - r > VW + 20 || cy + r < -20 || cy - r > VH + 20) return;
-    const int n = 16;
+    const int step = r < 26.0f ? 2 : 1;          /* small glows: 8 segments are plenty */
     uint32_t cm = col_a(c, 0.30f), ce = c & 0xFFFFFF00u;
     float rm = r * 0.35f;
     float pmx = cx + rm, pmy = cy, pex = cx + r, pey = cy;
     static const float K16[17][2] = {
         {1,0},{0.92388f,0.38268f},{0.70711f,0.70711f},{0.38268f,0.92388f},{0,1},{-0.38268f,0.92388f},{-0.70711f,0.70711f},{-0.92388f,0.38268f},
         {-1,0},{-0.92388f,-0.38268f},{-0.70711f,-0.70711f},{-0.38268f,-0.92388f},{0,-1},{0.38268f,-0.92388f},{0.70711f,-0.70711f},{0.92388f,-0.38268f},{1,0} };
-    for (int i = 1; i <= n; i++) {
+    for (int i = step; i <= 16; i += step) {
         float ca = K16[i][0], sa = K16[i][1];
         float mx = cx + ca * rm, my = cy + sa * rm, ex = cx + ca * r, ey = cy + sa * r;
         gfx_tri(cx, cy, c, pmx, pmy, cm, mx, my, cm);
@@ -307,48 +307,28 @@ void gfx_capsule(float x, float y, float dx, float dy, float len, float w, uint3
 }
 
 /* ------------------------------------------------------------------ */
-/* 5x7 pixel font                                                      */
+/* chunky 3x5 pixel font, drawn in the same 6 x 7 cell the old 5x7 used */
 /* ------------------------------------------------------------------ */
-typedef struct { char ch; uint8_t r[7]; } Glyph;
-static const Glyph FONT[] = {
-    {'0',{0x0E,0x11,0x13,0x15,0x19,0x11,0x0E}}, {'1',{0x04,0x0C,0x04,0x04,0x04,0x04,0x0E}},
-    {'2',{0x0E,0x11,0x01,0x02,0x04,0x08,0x1F}}, {'3',{0x1F,0x02,0x04,0x02,0x01,0x11,0x0E}},
-    {'4',{0x02,0x06,0x0A,0x12,0x1F,0x02,0x02}}, {'5',{0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E}},
-    {'6',{0x06,0x08,0x10,0x1E,0x11,0x11,0x0E}}, {'7',{0x1F,0x01,0x02,0x04,0x08,0x08,0x08}},
-    {'8',{0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E}}, {'9',{0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C}},
-    {'A',{0x0E,0x11,0x11,0x1F,0x11,0x11,0x11}}, {'B',{0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E}},
-    {'C',{0x0E,0x11,0x10,0x10,0x10,0x11,0x0E}}, {'D',{0x1C,0x12,0x11,0x11,0x11,0x12,0x1C}},
-    {'E',{0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F}}, {'F',{0x1F,0x10,0x10,0x1E,0x10,0x10,0x10}},
-    {'G',{0x0E,0x11,0x10,0x17,0x11,0x11,0x0F}}, {'H',{0x11,0x11,0x11,0x1F,0x11,0x11,0x11}},
-    {'I',{0x0E,0x04,0x04,0x04,0x04,0x04,0x0E}}, {'J',{0x07,0x02,0x02,0x02,0x02,0x12,0x0C}},
-    {'K',{0x11,0x12,0x14,0x18,0x14,0x12,0x11}}, {'L',{0x10,0x10,0x10,0x10,0x10,0x10,0x1F}},
-    {'M',{0x11,0x1B,0x15,0x15,0x11,0x11,0x11}}, {'N',{0x11,0x11,0x19,0x15,0x13,0x11,0x11}},
-    {'O',{0x0E,0x11,0x11,0x11,0x11,0x11,0x0E}}, {'P',{0x1E,0x11,0x11,0x1E,0x10,0x10,0x10}},
-    {'Q',{0x0E,0x11,0x11,0x11,0x15,0x12,0x0D}}, {'R',{0x1E,0x11,0x11,0x1E,0x14,0x12,0x11}},
-    {'S',{0x0F,0x10,0x10,0x0E,0x01,0x01,0x1E}}, {'T',{0x1F,0x04,0x04,0x04,0x04,0x04,0x04}},
-    {'U',{0x11,0x11,0x11,0x11,0x11,0x11,0x0E}}, {'V',{0x11,0x11,0x11,0x11,0x11,0x0A,0x04}},
-    {'W',{0x11,0x11,0x11,0x15,0x15,0x15,0x0A}}, {'X',{0x11,0x11,0x0A,0x04,0x0A,0x11,0x11}},
-    {'Y',{0x11,0x11,0x11,0x0A,0x04,0x04,0x04}}, {'Z',{0x1F,0x01,0x02,0x04,0x08,0x10,0x1F}},
-    {'x',{0x00,0x00,0x11,0x0A,0x04,0x0A,0x11}}, {'.',{0x00,0x00,0x00,0x00,0x00,0x0C,0x0C}},
-    {',',{0x00,0x00,0x00,0x00,0x0C,0x04,0x08}}, {'!',{0x04,0x04,0x04,0x04,0x04,0x00,0x04}},
-    {'?',{0x0E,0x11,0x01,0x02,0x04,0x00,0x04}}, {':',{0x00,0x0C,0x0C,0x00,0x0C,0x0C,0x00}},
-    {'-',{0x00,0x00,0x00,0x1F,0x00,0x00,0x00}}, {'+',{0x00,0x04,0x04,0x1F,0x04,0x04,0x00}},
-    {'/',{0x01,0x01,0x02,0x04,0x08,0x10,0x10}}, {'%',{0x18,0x19,0x02,0x04,0x08,0x13,0x03}},
-    {'\'',{0x04,0x04,0x08,0x00,0x00,0x00,0x00}}, {'(',{0x02,0x04,0x08,0x08,0x08,0x04,0x02}},
-    {')',{0x08,0x04,0x02,0x02,0x02,0x04,0x08}}, {'>',{0x08,0x04,0x02,0x01,0x02,0x04,0x08}},
-    {'<',{0x02,0x04,0x08,0x10,0x08,0x04,0x02}}, {'=',{0x00,0x00,0x1F,0x00,0x1F,0x00,0x00}},
-    {'*',{0x00,0x15,0x0E,0x1F,0x0E,0x15,0x00}}, {'#',{0x0A,0x0A,0x1F,0x0A,0x1F,0x0A,0x0A}},
+/* each glyph: 5 rows top to bottom, each row an octal digit (4 = left pixel, 2 = middle, 1 = right) */
+static const char FONT_CH[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ.:!-+/?><',%()=*#x";
+static const char *const FONT_D[] = {
+    "75557", "26227", "71747", "71717", "55711", "74717", "74757", "71111", "75757", "75717",
+    "25755", "65656", "34443", "65556", "74647", "74644", "34557", "55755", "72227", "11157",
+    "55655", "44447", "57755", "65555", "25552", "65644", "25571", "65655", "34716", "72222",
+    "55557", "55552", "55775", "55255", "55222", "71247",
+    "00002", "02020", "22202", "00700", "02720", "11244", "71302", "42124", "12421", "22000", "00024",
+    "51245", "12221", "42224", "07070", "05250", "57575", "00525",
 };
+#define GW (5.0f / 3.0f)          /* glyph pixel width, in units of px */
+#define GH (7.0f / 5.0f)          /* glyph pixel height */
 
-static const uint8_t *glyph(char ch)
+static const char *glyph(char ch)
 {
     if (ch >= 'a' && ch <= 'z' && ch != 'x') ch = (char)(ch - 32);
-    for (unsigned i = 0; i < sizeof FONT / sizeof FONT[0]; i++)
-        if (FONT[i].ch == ch) return FONT[i].r;
-    return NULL;
+    if (ch == ' ') return NULL;
+    const char *p = strchr(FONT_CH, ch);
+    return p && *p ? FONT_D[p - FONT_CH] : NULL;
 }
-
-const uint8_t *gfx_glyph(char ch) { return glyph(ch); }
 
 float gfx_text_width(const char *s, float px)
 {
@@ -356,24 +336,35 @@ float gfx_text_width(const char *s, float px)
     return n > 0 ? ((float)n * 6.0f - 1.0f) * px : 0.0f;
 }
 
-static void draw_glyph(const uint8_t *g, float x, float y, float px, uint32_t c)
+/* rows [r0, r1) of one glyph; each run of lit pixels in a row is one rectangle */
+static void draw_glyph_rows(const char *g, float x, float y, float px, uint32_t c, int r0, int r1)
 {
-    for (int r = 0; r < 7; r++) {
-        uint8_t bits = g[r];
-        int col = 0;
-        while (col < 5) {
-            if (!(bits & (0x10 >> col))) { col++; continue; }
-            int s = col;
-            while (col < 5 && (bits & (0x10 >> col))) col++;
-            gfx_rect(x + (float)s * px, y + (float)r * px, (float)(col - s) * px, px, c);
+    float w = GW * px, h = GH * px;
+    for (int r = r0; r < r1; r++) {
+        int bits = g[r] - '0', col = 0;
+        while (col < 3) {
+            if (!(bits & (4 >> col))) { col++; continue; }
+            int s0 = col;
+            while (col < 3 && (bits & (4 >> col))) col++;
+            gfx_rect(x + (float)s0 * w, y + (float)r * h, (float)(col - s0) * w, h, c);
         }
+    }
+}
+static void draw_glyph(const char *g, float x, float y, float px, uint32_t c) { draw_glyph_rows(g, x, y, px, c, 0, 5); }
+
+/* two-tone text: the top `rows` glyph rows in another colour (the title's fire lettering) */
+void gfx_text_top(const char *s, float x, float y, float px, uint32_t c, int rows)
+{
+    for (; *s; s++, x += 6.0f * px) {
+        const char *g = glyph(*s);
+        if (g) draw_glyph_rows(g, x, y, px, c, 0, rows);
     }
 }
 
 void gfx_text(const char *s, float x, float y, float px, uint32_t c)
 {
     for (; *s; s++, x += 6.0f * px) {
-        const uint8_t *g = glyph(*s);
+        const char *g = glyph(*s);
         if (g) draw_glyph(g, x, y, px, c);
     }
 }
@@ -385,17 +376,16 @@ void gfx_text_wave(const char *s, float cx, float y, float px, uint32_t c, float
 {
     float x = cx - gfx_text_width(s, px) * 0.5f;
     for (int i = 0; s[i]; i++, x += 6.0f * px) {
-        const uint8_t *g = glyph(s[i]);
+        const char *g = glyph(s[i]);
         if (g) draw_glyph(g, x, y + sinf(t * 7.0f - (float)i * 0.55f) * amp, px, c);
     }
 }
 
 void gfx_text_s(const char *s, float x, float y, float px, uint32_t c)
 {
-    float o = px * 0.6f;
+    float o = px * 0.7f;
     if (o < 1.0f) o = 1.0f;
-    if (px >= 1.75f)                      /* small text sits on dark panels and needs no shadow */
-        gfx_text(s, x + o, y + o, px, RGBA(0, 0, 0, (int)((float)(c & 255) * 0.75f)));
+    gfx_text(s, x + o, y + o, px, RGBA(0, 0, 0, (int)((float)(c & 255) * 0.8f)));   /* chunky drop shadow */
     gfx_text(s, x, y, px, c);
 }
 void gfx_text_sc(const char *s, float cx, float y, float px, uint32_t c) { gfx_text_s(s, cx - gfx_text_width(s, px) * 0.5f, y, px, c); }

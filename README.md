@@ -37,7 +37,7 @@ Pick a level on the title screen with left / right. Winning a level takes you st
    - **Pirate Ship** - big and armoured; its cannon broadsides jam every tower alongside for a moment
    - **Kraken** - the boss: a vast head and eight writhing tentacles; it dives out of reach now and then and calls up sharks as it comes
 
-The bigger map is drawn smaller to fit, so use **ZL / ZR** (L2 / R2) to zoom in and out - the view follows the cursor.
+The bigger map is drawn smaller to fit, so use **L / R** to zoom in and out - the view follows the cursor. The pirates shout at you like an old arcade cabinet: "Arr, matey!", "Avast, ye!", "Walk the plank!", "Shiver me timbers!" when the Kraken comes, "Yo ho ho!" and a "Har har har!" when they get their hands on your gold.
 
 Each level has its own music (dreary for the storm, light and fresh for autumn, fun and spooky for Halloween, slow and mysterious for the island, an epic stormy sea shanty for the pirates). Battles shake the screen with a little depth parallax (the near side of the board moves more than the far side), big hits punch the view, and every weapon has extra flourishes: blaster muzzle flashes and flying casings, mortar landing markers, fireballs and scorch marks, frost splinters and frosted-over enemies, and tesla coils that visibly charge up before they fire.
 
@@ -48,8 +48,8 @@ Each level has its own music (dreary for the storm, light and fresh for autumn, 
 | Left stick / D-Pad | move the cursor |
 | A | build the selected tower / upgrade the tower under the cursor |
 | B | sell (70% back) |
-| L / R | choose tower |
-| ZL / ZR | zoom out / in |
+| ZL / ZR | choose tower |
+| L / R | zoom out / in (the view follows the cursor) |
 | Y | fast forward on / off |
 | X | call the next wave early (bonus gold for the seconds you skip) |
 | + | pause (resume / music on-off / sound on-off / restart / quit to title) |
@@ -82,5 +82,7 @@ Locally with devkitPro installed: `make`.
 - Lighting comes from a coarse 3D light grid rebuilt each frame from the campfire, torches, towers, explosions, and the moon and lightning (level 1) or dappled low sunlight (level 2).
 - The scenery is projected once and only re-lit each frame, which keeps the Wii's CPU well inside 60 fps.
 - The sea swell on level 5 is part of the view transform: a slow roll and bob folded into the 2D affine every vertex already goes through, plus one table lookup per vertex for a wave rolling across the screen.
+- The pirate voices come from a tiny formant speech synthesizer (a buzzing glottal pulse through formant resonators, hiss for the fricatives, then crunched like an arcade speech chip) - no recordings.
+- The CPU builds the next frame while the GPU is still drawing the last one.
 - Every sound and all five music loops are composed and synthesized at start-up (a small offline synth with plucked strings, FM bells, a theremin, a fiddle, an accordion, brass, timpani and reverb). No asset files.
 - Trees sway by storing a sway weight with each cached vertex, so the whole forest moves for the cost of one sine per tree.
