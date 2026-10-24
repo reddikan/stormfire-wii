@@ -3,7 +3,7 @@
  *
  * Every effect is built at start-up from a small synth (band-limited and FM oscillators, resonant filtered
  * noise and a short echo), so no audio files are needed. Chunky, warm tabletop sounds plus a storm:
- * a seamless rain loop, rolling thunder and a sharp lightning crack.
+ * rolling thunder and a sharp lightning crack.
  */
 #include "audio.h"
 
@@ -30,7 +30,7 @@ static const uint8_t VOL[SFX_COUNT] = {
     /* POP */ 120,     /* CRUNCH */ 190, /* BUILD */ 190,  /* UPGRADE */ 200, /* SELL */ 170,   /* ERROR */ 140,
     /* MOVE */ 60,     /* SELECT */ 120, /* WAVE */ 200,   /* CLEAR */ 200,  /* HISS */ 200,   /* THUNDER */ 255,
     /* CRACK */ 230,   /* BOSS */ 240,   /* WIN */ 220,    /* LOSE */ 220,   /* PAUSE */ 120,  /* START */ 200,
-    /* COIN */ 170,    /* RAIN */ 110
+    /* COIN */ 170
 };
 
 /* ------------------------------------------------------------------ */
@@ -217,23 +217,6 @@ static void bell(float t, float f, float vol, float tau)
 }
 
 
-/* the rain loop: no echo, no fades, no trimming - the start and the end are crossfaded so it loops seamlessly */
-static void finish_loop(int id, int len)
-{
-    int xf = (int)(0.25f * SR);
-    float peak = 0.0f;
-    for (int i = 0; i < len; i++) {
-        float x = mixbuf[i];
-        if (i < xf) { float u = (float)i / (float)xf; x = x * u + mixbuf[len + i] * (1.0f - u); }
-        outbuf[i] = x;
-        if (fabsf(x) > peak) peak = fabsf(x);
-    }
-    float scale = peak > 0.0f ? 0.8f * 32000.0f / peak : 0.0f;
-    memset(SFX[id], 0, sizeof SFX[id]);
-    for (int i = 0; i < len; i++) SFX[id][i] = (int16_t)(outbuf[i] * scale);
-    sfx_len[id] = len;
-}
-
 void audio_init(void)
 {
     if (ready) return;
@@ -393,20 +376,6 @@ void audio_init(void)
     noise(0.02f, 0.5f, 3000, 400, 0.8f, 0.7f, 0.001f, 0.12f, F_LP);
     tone(0.0f, 0.3f, 180, 50, 0.6f, 0.001f, 0.1f, W_SIN, 0, 0);
     finish_fx(SFX_CRACK, 0.3f, 0.5f);
-
-    /* rain: three layers of filtered noise (hiss, patter, low wash), 2 s, looped */
-    begin();
-    {
-        int len = (int)(2.0f * SR);
-        noise(0, 2.5f, 5000, 5000, 0.5f, 0.45f, 0.0f, 0.0f, F_BP);
-        noise(0, 2.5f, 1200, 1200, 0.7f, 0.35f, 0.0f, 0.0f, F_BP);
-        noise(0, 2.5f, 300, 300, 0.7f, 0.5f, 0.0f, 0.0f, F_LP);
-        for (int i = 0; i < 160; i++) {                              /* individual drops pattering */
-            float t = (frand() * 0.5f + 0.5f) * 2.25f;              /* frand() is -1..1 */
-            noise(t, 0.02f, 2500 + 2000 * (frand() * 0.5f + 0.5f), 1500, 3.0f, 0.12f, 0.001f, 0.006f, F_BP);
-        }
-        finish_loop(SFX_RAIN, len);
-    }
 }
 
 const int16_t *audio_data(int id) { return SFX[id]; }

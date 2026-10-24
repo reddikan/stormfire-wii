@@ -193,7 +193,7 @@ static Result play(int skill, uint32_t seed, int shots, const char *tag)
         if (++think >= (skill == 1 ? 90 : 20)) { think = 0; bot_think(G, skill); }
         /* keen bots call waves early once they are set up */
         if (skill == 3 && !G->wave_on && G->countdown < 9.0f && G->wave > 0) {
-            Input in = NONE; in.pressed = in.held = BTN_R; step(G, &in);
+            Input in = NONE; in.pressed = in.held = BTN_X; step(G, &in);
         }
         step(G, &NONE);
         t += 1.0f / 60.0f;

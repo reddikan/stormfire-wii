@@ -20,10 +20,10 @@ enum {
     BTN_RIGHT = 1 << 3,
     BTN_A     = 1 << 4,     /* build / upgrade          */
     BTN_B     = 1 << 5,     /* sell                     */
-    BTN_X     = 1 << 6,     /* previous tower type      */
-    BTN_Y     = 1 << 7,     /* next tower type          */
-    BTN_L     = 1 << 8,     /* fast forward on / off    */
-    BTN_R     = 1 << 9,     /* call the next wave early */
+    BTN_X     = 1 << 6,     /* call the next wave early */
+    BTN_Y     = 1 << 7,     /* fast forward on / off    */
+    BTN_L     = 1 << 8,     /* previous tower type      */
+    BTN_R     = 1 << 9,     /* next tower type          */
     BTN_PLUS  = 1 << 10     /* pause                    */
 };
 

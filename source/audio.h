@@ -4,7 +4,6 @@
  * No audio files: every effect is generated at start-up from FM / band-limited
  * oscillators and filtered noise. Samples are 16-bit signed mono at SFX_RATE Hz
  * in the host's byte order (big-endian on the Wii, which is what ASND wants).
- * SFX_RAIN is a seamless loop that the platform layer plays forever.
  */
 #ifndef AUDIO_H
 #define AUDIO_H
@@ -17,7 +16,7 @@ enum {
     SFX_BLASTER, SFX_MORTAR, SFX_BOOM, SFX_FROST, SFX_ZAP, SFX_HIT, SFX_POP, SFX_CRUNCH,
     SFX_BUILD, SFX_UPGRADE, SFX_SELL, SFX_ERROR, SFX_MOVE, SFX_SELECT,
     SFX_WAVE, SFX_CLEAR, SFX_HISS, SFX_THUNDER, SFX_CRACK, SFX_BOSS,
-    SFX_WIN, SFX_LOSE, SFX_PAUSE, SFX_START, SFX_COIN, SFX_RAIN,
+    SFX_WIN, SFX_LOSE, SFX_PAUSE, SFX_START, SFX_COIN,
     SFX_COUNT
 };
 

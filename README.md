@@ -11,10 +11,10 @@ A campfire burns in the middle of a brick maze in the woods. Through a night of 
 | Left stick / D-Pad | move the cursor |
 | A | build the selected tower / upgrade the tower under the cursor |
 | B | sell (70% back) |
-| X / Y | choose tower |
-| L | fast forward on / off |
-| R | call the next wave early (bonus gold for the seconds you skip) |
-| + | pause (resume / restart) |
+| L / R | choose tower |
+| Y | fast forward on / off |
+| X | call the next wave early (bonus gold for the seconds you skip) |
+| + | pause (resume / sound on-off / restart) |
 | - | 16:9 / letterboxed 4:3 |
 | HOME | exit |
 
@@ -42,4 +42,4 @@ Locally with devkitPro installed: `make`.
 - Everything is drawn as coloured triangles by the GPU: a small 3D layer projects low-poly boxes, prisms and crystals through a tilted perspective camera and draws them back to front.
 - Lighting comes from a coarse 3D light grid rebuilt each frame from the campfire, torches, towers, explosions, the moon and lightning flashes.
 - The scenery is projected once and only re-lit each frame, which keeps the Wii's CPU well inside 60 fps.
-- Every sound, including the endless rain loop and the thunder, is synthesized at start-up. No asset files.
+- Every sound, including the thunder, is synthesized at start-up. No asset files.

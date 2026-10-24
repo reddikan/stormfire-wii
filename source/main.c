@@ -5,8 +5,7 @@
  *           shaded triangles with normal and additive blending, 60 fps, 16:9
  *           anamorphic (or letterboxed inside 4:3 - press MINUS)
  *   input : Wii Classic Controller (plugged into Wii Remote 1): buttons + left stick
- *   audio : synthesized effects played through ASND, pitch-shifted and panned per event,
- *           plus an endless rain loop on its own voice
+ *   audio : synthesized effects played through ASND, pitch-shifted and panned per event
  *
  * Everything game-related lives in the platform-independent C files.
  */
@@ -208,12 +207,10 @@ static u32 read_input(Input *in)
 /* ------------------------------------------------------------------ */
 /* audio                                                               */
 /* ------------------------------------------------------------------ */
-#define RAIN_VOICE 0
-
 static void play_sfx(int id, int pitch, float pan)
 {
     s32 v = ASND_GetFirstUnusedVoice();
-    if (v < 0 || v == RAIN_VOICE) return;      /* all voices busy: skip this one */
+    if (v < 0) return;      /* all voices busy: skip this one */
     int vol = audio_volume(id);
     int vl = (int)((float)vol * (pan > 0 ? 1.0f - pan * 0.7f : 1.0f));
     int vr = (int)((float)vol * (pan < 0 ? 1.0f + pan * 0.7f : 1.0f));
@@ -242,9 +239,6 @@ int main(int argc, char **argv)
     game_init(game);                           /* also synthesizes the sound effects */
     for (int id = 0; id < SFX_COUNT; id++)     /* ASND reads samples by DMA: flush the cache */
         DCFlushRange((void *)audio_data(id), (u32)audio_len(id) * 2);
-    /* the rain never stops */
-    ASND_SetInfiniteVoice(RAIN_VOICE, VOICE_MONO_16BIT, SFX_RATE, 0, (void *)audio_data(SFX_RAIN),
-                          audio_len(SFX_RAIN) * 2, audio_volume(SFX_RAIN), audio_volume(SFX_RAIN));
 
     const float dt = 1.0f / 60.0f;              /* the game simulates in fixed 1/60 s steps */
     u32 prev = 0;

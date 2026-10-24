@@ -20,7 +20,7 @@ float frand2(Game *g) { return frand(g) * 2.0f - 1.0f; }
 
 static void snd(Game *g, int id, int pitch, float x)
 {
-    if (g->snd_n >= SND_Q) return;
+    if (g->mute || g->snd_n >= SND_Q) return;
     g->snd_id[g->snd_n] = id;
     g->snd_pitch[g->snd_n] = pitch;
     g->snd_pan[g->snd_n] = clampf((x - FIRE_X) / 11.0f, -0.8f, 0.8f);
@@ -870,9 +870,9 @@ static void play_input(Game *g, const Input *in, float dt)
         }
     } else g->stick_t = 0;
 
-    if (in->pressed & BTN_X) { g->sel = (g->sel + TW_TYPES - 1) % TW_TYPES; g->sel_t = 1.0f; snd(g, SFX_SELECT, 120, FIRE_X); }
-    if (in->pressed & BTN_Y) { g->sel = (g->sel + 1) % TW_TYPES; g->sel_t = 1.0f; snd(g, SFX_SELECT, 136, FIRE_X); }
-    if (in->pressed & BTN_L) { g->fast = !g->fast; snd(g, SFX_SELECT, g->fast ? 150 : 105, FIRE_X); }
+    if (in->pressed & BTN_L) { g->sel = (g->sel + TW_TYPES - 1) % TW_TYPES; g->sel_t = 1.0f; snd(g, SFX_SELECT, 120, FIRE_X); }
+    if (in->pressed & BTN_R) { g->sel = (g->sel + 1) % TW_TYPES; g->sel_t = 1.0f; snd(g, SFX_SELECT, 136, FIRE_X); }
+    if (in->pressed & BTN_Y) { g->fast = !g->fast; snd(g, SFX_SELECT, g->fast ? 150 : 105, FIRE_X); }
 
     Tower *t = &g->tw[g->cz][g->cx];
     float tx = (float)g->cx + 0.5f, tz = (float)g->cz + 0.5f, th = g->tile[g->cz][g->cx].h;
@@ -908,7 +908,7 @@ static void play_input(Game *g, const Input *in, float dt)
         t->type = -1;
         snd(g, SFX_SELL, 128, tx);
     }
-    if ((in->pressed & BTN_R) && !g->wave_on && g->wave < NUM_WAVES) {
+    if ((in->pressed & BTN_X) && !g->wave_on && g->wave < NUM_WAVES) {
         int bonus = (int)g->countdown;
         if (bonus > 0) {
             g->gold += bonus;
@@ -957,9 +957,11 @@ void game_update(Game *g, const Input *in, float dt)
         update_enemies(g, dt);
         break;
     case ST_PAUSE:
-        if (in->pressed & (BTN_UP | BTN_DOWN)) { g->menu ^= 1; snd(g, SFX_MOVE, 128, FIRE_X); }
+        if (in->pressed & BTN_UP) { g->menu = (g->menu + 2) % 3; snd(g, SFX_MOVE, 128, FIRE_X); }
+        if (in->pressed & BTN_DOWN) { g->menu = (g->menu + 1) % 3; snd(g, SFX_MOVE, 128, FIRE_X); }
         if ((in->pressed & BTN_PLUS) || ((in->pressed & BTN_A) && g->menu == 0)) { g->state = ST_PLAY; snd(g, SFX_PAUSE, 150, FIRE_X); }
-        else if ((in->pressed & BTN_A) && g->menu == 1) { new_game(g); snd(g, SFX_START, 128, FIRE_X); }
+        else if ((in->pressed & BTN_A) && g->menu == 1) { g->mute = !g->mute; snd(g, SFX_SELECT, 136, FIRE_X); }
+        else if ((in->pressed & BTN_A) && g->menu == 2) { new_game(g); snd(g, SFX_START, 128, FIRE_X); }
         break;
     case ST_WIN: case ST_LOSE:
         g->end_t += dt;

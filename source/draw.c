@@ -961,7 +961,7 @@ static void draw_hud(void)
     if (!G->wave_on && G->wave < NUM_WAVES) {
         snprintf(buf, sizeof buf, "NEXT IN %d", (int)ceilf(G->countdown));
         gfx_text_sr(buf, VW - 26, 42, 1.4f, 0xFFD070FF);
-        snprintf(buf, sizeof buf, "R: CALL NOW +%d", (int)G->countdown);
+        snprintf(buf, sizeof buf, "X: CALL NOW +%d", (int)G->countdown);
         gfx_text_sr(buf, VW - 26, 55, 1.2f, 0xA8B4D0FF);
     } else {
         int left = 0;
@@ -1019,8 +1019,8 @@ static void draw_hud(void)
         coin_icon(cx + 12, cy + lift + 60, 4.5f);
         gfx_text_s(buf, cx + 20, cy + lift + 55, 1.5f, col_a(afford ? 0xFFE070FF : 0xFF6050FF, cfade));
     }
-    gfx_text_s("X", 14 + 4 * 62, cy + 14, 1.5f, col_a(0x8090B0FF, cfade));
-    gfx_text_s("Y", 14 + 4 * 62, cy + 40, 1.5f, col_a(0x8090B0FF, cfade));
+    gfx_text_s("L", 14 + 4 * 62, cy + 14, 1.5f, col_a(0x8090B0FF, cfade));
+    gfx_text_s("R", 14 + 4 * 62, cy + 40, 1.5f, col_a(0x8090B0FF, cfade));
     gfx_text_s(TOWERS[G->sel].name, 14, cy - 22, 1.8f, col_a(TOWERS[G->sel].glow, cfade));
 
     /* info panel for the tile under the cursor */
@@ -1054,7 +1054,7 @@ static void draw_hud(void)
     }
 
     /* controls reminder */
-    gfx_text_sc("L: SPEED   +: PAUSE", VW * 0.5f + 20, VH - 14, 1.2f, 0x8C98B4C0);
+    gfx_text_sc("Y: SPEED   +: PAUSE", VW * 0.5f + 20, VH - 14, 1.2f, 0x8C98B4C0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1089,7 +1089,7 @@ static void draw_title(void)
     gfx_text_sc("KEEP THE CAMPFIRE BURNING THROUGH THE STORM", VW * 0.5f, 212, 1.8f, 0xC8D4F0FF);
     if (fmodf(T, 1.2f) < 0.85f) gfx_text_sc("PRESS A TO START", VW * 0.5f, 268, 2.6f, 0xFFFFFFFF);
     panel(VW * 0.5f - 230, 316, 460, 112, 0x0A0E18C0);
-    static const char *L1[] = { "STICK / D-PAD", "A", "B", "X / Y", "L", "R" };
+    static const char *L1[] = { "STICK / D-PAD", "A", "B", "L / R", "Y", "X" };
     static const char *L2[] = { "MOVE THE CURSOR", "BUILD / UPGRADE", "SELL", "CHOOSE TOWER", "FAST FORWARD", "CALL NEXT WAVE EARLY" };
     for (int i = 0; i < 6; i++) {
         float y = 328 + (float)(i % 3) * 32, x = VW * 0.5f - 214 + (float)(i / 3) * 228;
@@ -1135,12 +1135,12 @@ static void draw_end(void)
 static void draw_pause(void)
 {
     gfx_rect(0, 0, VW, VH, 0x02040AA0);
-    gfx_text_sc("PAUSED", VW * 0.5f, 150, 5.0f, 0xFFFFFFFF);
-    static const char *M[2] = { "RESUME", "RESTART" };
-    for (int i = 0; i < 2; i++) {
+    gfx_text_sc("PAUSED", VW * 0.5f, 140, 5.0f, 0xFFFFFFFF);
+    const char *M[3] = { "RESUME", G->mute ? "SOUND: OFF" : "SOUND: ON", "RESTART" };
+    for (int i = 0; i < 3; i++) {
         int s = G->menu == i;
-        float y = 240 + (float)i * 44;
-        if (s) panel(VW * 0.5f - 110, y - 10, 220, 38, 0xFF904060);
+        float y = 222 + (float)i * 44;
+        if (s) panel(VW * 0.5f - 120, y - 10, 240, 38, 0xFF904060);
         gfx_text_sc(M[i], VW * 0.5f, y, 2.6f, s ? 0xFFFFFFFF : 0x8090B0FF);
     }
 }

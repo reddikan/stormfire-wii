@@ -149,7 +149,8 @@ struct Game {
     float rep_t; uint32_t rep_dir;
     float stick_t;
     float gold_flash, fire_flash, err_t, sel_t;
-    int   menu;             /* pause menu item */
+    int   menu;             /* pause menu item: 0 resume, 1 sound, 2 restart */
+    int   mute;             /* sound effects off */
 
     /* waves */
     int   wave;             /* waves started so far (1-based display) */

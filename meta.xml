@@ -11,10 +11,10 @@ Controls (Classic Controller):
 Left stick / D-Pad: move the cursor
 A: build / upgrade
 B: sell
-X / Y: choose tower
-L: fast forward
-R: call the next wave early (bonus gold)
-+: pause
+L / R: choose tower
+Y: fast forward
+X: call the next wave early (bonus gold)
++: pause (sound on/off, restart)
 -: 16:9 / 4:3 screen
 HOME: exit</long_description>
 </app>
