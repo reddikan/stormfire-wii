@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<app version="1">
+  <name>Stormfire</name>
+  <coder>Claude</coder>
+  <version>1.0</version>
+  <release_date>20261023000000</release_date>
+  <short_description>Stormy low-poly tower defense (Classic Controller)</short_description>
+  <long_description>Keep the campfire burning through a night of rain and lightning. Enemies march in from every side of the forest; build and upgrade four kinds of towers on the walls and blocks to stop them, and survive 12 waves and the Storm Golem.
+
+Controls (Classic Controller):
+Left stick / D-Pad: move the cursor
+A: build / upgrade
+B: sell
+X / Y: choose tower
+L: fast forward
+R: call the next wave early (bonus gold)
++: pause
+-: 16:9 / 4:3 screen
+HOME: exit</long_description>
+</app>

@@ -1,0 +1,971 @@
+/*
+ * STORMFIRE - game logic: towers, enemies, waves, the storm. Drawing is in draw.c.
+ */
+#include "game_int.h"
+
+#include <math.h>
+#include <string.h>
+#include <stdio.h>
+
+#define TAU 6.28318530718f
+
+const int GAME_SIZE = (int)sizeof(Game);
+
+float frand(Game *g)
+{
+    g->rng ^= g->rng << 13; g->rng ^= g->rng >> 17; g->rng ^= g->rng << 5;
+    return (float)(g->rng >> 8) / 16777216.0f;
+}
+float frand2(Game *g) { return frand(g) * 2.0f - 1.0f; }
+
+static void snd(Game *g, int id, int pitch, float x)
+{
+    if (g->snd_n >= SND_Q) return;
+    g->snd_id[g->snd_n] = id;
+    g->snd_pitch[g->snd_n] = pitch;
+    g->snd_pan[g->snd_n] = clampf((x - FIRE_X) / 11.0f, -0.8f, 0.8f);
+    g->snd_n++;
+}
+
+int game_pop_sound(Game *g, int *pitch, float *pan)
+{
+    if (g->snd_n <= 0) return -1;
+    int id = g->snd_id[0];
+    if (pitch) *pitch = g->snd_pitch[0];
+    if (pan) *pan = g->snd_pan[0];
+    for (int i = 1; i < g->snd_n; i++) {
+        g->snd_id[i - 1] = g->snd_id[i]; g->snd_pitch[i - 1] = g->snd_pitch[i]; g->snd_pan[i - 1] = g->snd_pan[i];
+    }
+    g->snd_n--;
+    return id;
+}
+
+int game_speed(const Game *g) { return (g->state == ST_PLAY && g->fast) ? 2 : 1; }
+
+/* ------------------------------------------------------------------ */
+/* towers                                                              */
+/* ------------------------------------------------------------------ */
+int tower_cost(int type, int lvl) { return TOWERS[type].cost[lvl]; }
+float tower_range(const Tower *t) { return TOWERS[t->type].range[t->lvl]; }
+int tower_sell_value(const Tower *t) { return (int)(t->spent * 0.7f + 0.5f); }
+
+int can_build(const Game *g, int cx, int cz)
+{
+    if (cx < 0 || cz < 0 || cx >= MW || cz >= MH) return 0;
+    int k = g->tile[cz][cx].kind;
+    return (k == TL_WALL || k == TL_BLOCK || k == TL_LAWN) && g->tw[cz][cx].type < 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* effects                                                             */
+/* ------------------------------------------------------------------ */
+static Part *part(Game *g, int kind, float x, float y, float z)
+{
+    Part *p = &g->pt[g->npt_next];
+    g->npt_next = (g->npt_next + 1) % MAX_PT;
+    memset(p, 0, sizeof *p);
+    p->kind = (uint8_t)kind; p->x = x; p->y = y; p->z = z;
+    p->life = p->max = 1.0f; p->size = 0.1f; p->c = 0xFFFFFFFF;
+    return p;
+}
+
+static void sparks(Game *g, float x, float y, float z, int n, uint32_t c, float spd)
+{
+    for (int i = 0; i < n; i++) {
+        Part *p = part(g, PT_SPARK, x, y, z);
+        float a = frand(g) * TAU, u = frand(g);
+        p->vx = cosf(a) * spd * (0.3f + u); p->vz = sinf(a) * spd * (0.3f + u);
+        p->vy = spd * (0.3f + frand(g) * 1.1f);
+        p->life = p->max = 0.25f + frand(g) * 0.35f;
+        p->size = 0.05f; p->c = c;
+    }
+}
+
+static void debris(Game *g, float x, float y, float z, int n, uint32_t c, float size)
+{
+    for (int i = 0; i < n; i++) {
+        Part *p = part(g, PT_DEBRIS, x, y, z);
+        float a = frand(g) * TAU;
+        float s = 1.0f + frand(g) * 2.2f;
+        p->vx = cosf(a) * s; p->vz = sinf(a) * s; p->vy = 2.0f + frand(g) * 3.0f;
+        p->life = p->max = 0.7f + frand(g) * 0.6f;
+        p->size = size * (0.6f + frand(g) * 0.6f);
+        p->rot = frand(g) * TAU; p->vr = frand2(g) * 12.0f;
+        p->c = c;
+    }
+}
+
+static void smoke(Game *g, float x, float y, float z, int n, float size, uint32_t c)
+{
+    for (int i = 0; i < n; i++) {
+        Part *p = part(g, PT_SMOKE, x + frand2(g) * 0.2f, y, z + frand2(g) * 0.2f);
+        p->vx = frand2(g) * 0.4f; p->vz = frand2(g) * 0.4f; p->vy = 0.4f + frand(g) * 0.6f;
+        p->life = p->max = 0.8f + frand(g) * 0.8f;
+        p->size = size * (0.7f + frand(g) * 0.6f);
+        p->c = c;
+    }
+}
+
+static void ring(Game *g, float x, float y, float z, float r0, float r1, float life, uint32_t c)
+{
+    Part *p = part(g, PT_RING, x, y, z);
+    p->size = r0; p->vx = r1; p->life = p->max = life; p->c = c;
+}
+
+static void flight(Game *g, float x, float y, float z, uint32_t c, float strength, float rad, float life)
+{
+    int best = 0;
+    for (int i = 0; i < MAX_FL; i++) {
+        if (g->fl[i].t >= g->fl[i].life) { best = i; break; }
+        if (g->fl[i].t / g->fl[i].life > g->fl[best].t / g->fl[best].life) best = i;
+    }
+    FLight *l = &g->fl[best];
+    l->x = x; l->y = y; l->z = z;
+    l->r = (float)(c >> 24) / 255.0f * strength;
+    l->g = (float)((c >> 16) & 255) / 255.0f * strength;
+    l->b = (float)((c >> 8) & 255) / 255.0f * strength;
+    l->rad = rad; l->t = 0; l->life = life;
+}
+
+static void popup(Game *g, float x, float y, float z, const char *txt, uint32_t c)
+{
+    int best = 0;
+    for (int i = 0; i < MAX_POP; i++) { if (g->pop[i].t > g->pop[best].t) best = i; }
+    for (int i = 0; i < MAX_POP; i++) if (g->pop[i].t >= 1.0f) { best = i; break; }
+    Pop *p = &g->pop[best];
+    p->x = x; p->y = y; p->z = z; p->t = 0; p->c = c;
+    snprintf(p->txt, sizeof p->txt, "%s", txt);
+}
+
+static void make_arc(Game *g, const float *a, const float *b, uint32_t c, float life, int storm, float jag)
+{
+    for (int i = 0; i < MAX_ARC; i++) {
+        Arc *r = &g->arc[i];
+        if (r->alive) continue;
+        r->alive = 1; r->storm = (uint8_t)storm; r->t = 0; r->life = life; r->c = c;
+        r->n = storm ? ARC_PTS : 7;
+        for (int k = 0; k < r->n; k++) {
+            float u = (float)k / (float)(r->n - 1);
+            float j = (k == 0 || k == r->n - 1) ? 0.0f : jag;
+            r->p[k][0] = a[0] + (b[0] - a[0]) * u + frand2(g) * j;
+            r->p[k][1] = a[1] + (b[1] - a[1]) * u + frand2(g) * j * 0.6f;
+            r->p[k][2] = a[2] + (b[2] - a[2]) * u + frand2(g) * j;
+        }
+        return;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* enemies                                                             */
+/* ------------------------------------------------------------------ */
+static const float WAVE1 = 1.0f;
+
+static float wave_hpmul(const Game *g)
+{
+    int w = g->wave - 1;
+    if (w < 0) w = 0;
+    if (w >= NUM_WAVES) w = NUM_WAVES - 1;
+    return WAVES[w].hpmul * WAVE1;
+}
+
+static void set_target(Game *g, Enemy *e)
+{
+    /* walk to the centre of tile (cx, cz), shifted sideways by the enemy's lane */
+    float tx = (float)e->cx + 0.5f, tz = (float)e->cz + 0.5f;
+    float dx = tx - e->x, dz = tz - e->z, l = sqrtf(dx * dx + dz * dz);
+    if (g->tile[e->cz][e->cx].kind == TL_FIRE) {
+        /* last stretch: stop at the stone ring round the fire */
+        float fx = e->x - FIRE_X, fz = e->z - FIRE_Z, fl = sqrtf(fx * fx + fz * fz);
+        if (fl < 0.01f) fl = 0.01f;
+        e->tx = FIRE_X + fx / fl * 0.6f; e->tz = FIRE_Z + fz / fl * 0.6f;
+        return;
+    }
+    if (l > 0.01f) { tx += -dz / l * e->lane; tz += dx / l * e->lane; }
+    e->tx = tx; e->tz = tz;
+}
+
+static void spawn_enemy(Game *g, int type, int gate)
+{
+    int slot = -1;
+    for (int i = 0; i < MAX_EN; i++) if (!g->en[i].alive) { slot = i; break; }
+    if (slot < 0) return;
+    Enemy *e = &g->en[slot];
+    memset(e, 0, sizeof *e);
+    const EnemyDef *d = &ENEMIES[type];
+    e->alive = 1; e->type = (uint8_t)type; e->fly = (uint8_t)d->fly;
+    e->maxhp = e->hp = d->hp * wave_hpmul(g);
+    e->speed = d->speed * (0.94f + frand(g) * 0.12f);
+    e->anim = frand(g) * 10.0f;
+    e->lane = frand2(g) * (type == EN_GOLEM ? 0.0f : 0.17f);
+    if (type == EN_GOLEM) g->boss = slot;
+    if (d->fly) {
+        float a = frand(g) * TAU;
+        e->x = FIRE_X + cosf(a) * 12.5f; e->z = FIRE_Z + sinf(a) * 8.5f;
+        e->y = 1.3f;
+        e->tx = FIRE_X; e->tz = FIRE_Z;
+        e->ang = atan2f(FIRE_Z - e->z, FIRE_X - e->x);
+        e->prog = 20.0f;
+        return;
+    }
+    int gc = GATES[gate][0], gr = GATES[gate][1];
+    float ox = 0, oz = 0;
+    if (gr == 0) oz = -1; else if (gr == MH - 1) oz = 1; else if (gc == 0) ox = -1; else ox = 1;
+    e->x = (float)gc + 0.5f + ox * 1.8f; e->z = (float)gr + 0.5f + oz * 1.8f;
+    e->entering = 1;
+    e->cx = gc; e->cz = gr;
+    e->tx = (float)gc + 0.5f; e->tz = (float)gr + 0.5f;
+    e->ang = atan2f(-oz, -ox);
+    e->prog = (float)g->dist[gr][gc] + 2.0f;
+}
+
+static void leak(Game *g, Enemy *e, int idx)
+{
+    int dmg = ENEMIES[e->type].damage;
+    g->fire -= dmg;
+    g->leaked += dmg;
+    g->fire_hit = 1.0f;
+    g->fire_flash = 1.0f;
+    e->alive = 0;
+    if (idx == g->boss) g->boss = -1;
+    for (int i = 0; i < 6; i++) {
+        Part *p = part(g, PT_STEAM, FIRE_X + frand2(g) * 0.4f, 0.4f, FIRE_Z + frand2(g) * 0.4f);
+        p->vx = frand2(g) * 0.6f; p->vz = frand2(g) * 0.6f; p->vy = 1.2f + frand(g);
+        p->life = p->max = 1.0f + frand(g) * 0.7f; p->size = 0.35f + frand(g) * 0.3f; p->c = 0xC8D0E0FF;
+    }
+    sparks(g, e->x, 0.5f, e->z, 10, 0x8098FFFF, 2.5f);
+    snd(g, SFX_HISS, 118 + (int)(frand(g) * 20), e->x);
+    char t[12];
+    snprintf(t, sizeof t, "-%d", dmg);
+    popup(g, FIRE_X, 1.6f, FIRE_Z, t, 0xFF5050FF);
+    if (g->fire <= 0) {
+        g->fire = 0;
+        g->state = ST_LOSE;
+        g->end_t = 0;
+        smoke(g, FIRE_X, 0.4f, FIRE_Z, 14, 0.7f, 0x707888FF);
+        snd(g, SFX_LOSE, 128, FIRE_X);
+    }
+}
+
+static const uint32_t EN_COL[EN_TYPES] = { 0x3CB4E6FF, 0x9A5CE8FF, 0xC8483CFF, 0x9CFFD8FF, 0x7C8894FF };
+
+static void hurt(Game *g, int idx, float dmg)
+{
+    Enemy *e = &g->en[idx];
+    if (!e->alive) return;
+    e->hp -= dmg;
+    e->hit_t = 0.12f;
+    if (e->hp > 0) return;
+    e->alive = 0;
+    g->kills++;
+    const EnemyDef *d = &ENEMIES[e->type];
+    g->gold += d->bounty;
+    g->gold_flash = 1.0f;
+    char t[12];
+    snprintf(t, sizeof t, "+%d", d->bounty);
+    popup(g, e->x, e->y + 0.9f, e->z, t, 0xFFD860FF);
+    float s = d->size;
+    debris(g, e->x, e->y + s * 0.6f, e->z, e->type == EN_GOLEM ? 26 : (e->type == EN_BRUTE ? 12 : 6), EN_COL[e->type], s * 0.35f);
+    sparks(g, e->x, e->y + s * 0.6f, e->z, e->type == EN_GOLEM ? 40 : 10, 0xFFD080FF, 2.6f);
+    flight(g, e->x, e->y + 0.5f, e->z, 0xFFB060FF, e->type >= EN_BRUTE ? 1.6f : 0.9f, e->type == EN_GOLEM ? 5.0f : 2.0f, 0.35f);
+    ring(g, e->x, e->y + 0.03f, e->z, 0.1f, s * 2.6f, 0.4f, 0xFFC08080);
+    if (e->type == EN_GOLEM) {
+        g->shake = 1.0f;
+        smoke(g, e->x, 0.4f, e->z, 12, 0.8f, 0x50586090);
+        snd(g, SFX_BOOM, 80, e->x);
+        snd(g, SFX_CRUNCH, 90, e->x);
+        g->boss = -1;
+    } else if (e->type == EN_BRUTE) {
+        snd(g, SFX_CRUNCH, 120 + (int)(frand(g) * 16), e->x);
+    } else {
+        snd(g, SFX_POP, 110 + (int)(frand(g) * 40), e->x);
+    }
+    if (idx == g->boss) g->boss = -1;
+}
+
+static void update_enemies(Game *g, float dt)
+{
+    for (int i = 0; i < MAX_EN; i++) {
+        Enemy *e = &g->en[i];
+        if (!e->alive) continue;
+        e->hit_t -= dt; e->zap_t -= dt;
+        if (e->slow_t > 0) { e->slow_t -= dt; if (e->slow_t <= 0) e->slow_amt = 0; }
+        float spd = e->speed * (1.0f - e->slow_amt);
+        e->anim += dt * spd * 6.0f;
+        float dx = e->tx - e->x, dz = e->tz - e->z, d = sqrtf(dx * dx + dz * dz);
+        float step = spd * dt;
+        if (d > 0.001f) {
+            float want = atan2f(dz, dx), da = want - e->ang;
+            while (da > 3.14159f) da -= TAU;
+            while (da < -3.14159f) da += TAU;
+            e->ang += da * clampf(dt * 10.0f, 0, 1);
+        }
+        if (e->fly) {
+            e->y = 1.3f + sinf(e->anim * 0.9f) * 0.12f;
+            if (d <= 0.6f) { leak(g, e, i); continue; }
+            e->x += dx / d * step; e->z += dz / d * step;
+            e->prog = d;
+            continue;
+        }
+        if (d <= step) {
+            e->x = e->tx; e->z = e->tz;
+            if (g->tile[e->cz][e->cx].kind == TL_FIRE) { leak(g, e, i); if (g->state != ST_PLAY) return; continue; }
+            if (e->entering) e->entering = 0;
+            int nc = g->nxt[e->cz][e->cx][0], nr = g->nxt[e->cz][e->cx][1];
+            if (nc < 0) { leak(g, e, i); continue; }       /* cannot happen on a valid map */
+            e->cx = nc; e->cz = nr;
+            set_target(g, e);
+        } else {
+            e->x += dx / d * step; e->z += dz / d * step;
+        }
+        float rem = sqrtf((e->tx - e->x) * (e->tx - e->x) + (e->tz - e->z) * (e->tz - e->z));
+        e->prog = (float)g->dist[e->cz][e->cx] + rem + (e->entering ? 1.0f : 0.0f);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* waves                                                               */
+/* ------------------------------------------------------------------ */
+static void ordinal(int n, char *buf, int sz)
+{
+    const char *suf = "TH";
+    if (n % 100 < 11 || n % 100 > 13) {
+        if (n % 10 == 1) suf = "ST"; else if (n % 10 == 2) suf = "ND"; else if (n % 10 == 3) suf = "RD";
+    }
+    snprintf(buf, sz, "%d%s", n, suf);
+}
+
+static void start_wave(Game *g)
+{
+    if (g->wave >= NUM_WAVES) return;
+    g->wave++;
+    g->wave_on = 1;
+    g->wave_t = 0;
+    memset(g->spawned, 0, sizeof g->spawned);
+    g->banner_t = 0;
+    snprintf(g->banner, sizeof g->banner, "WAVE %d/%d", g->wave, NUM_WAVES);
+    if (g->wave == NUM_WAVES) snprintf(g->banner2, sizeof g->banner2, "THE STORM GOLEM COMES!");
+    else {
+        char o[8];
+        ordinal(g->wave, o, sizeof o);
+        snprintf(g->banner2, sizeof g->banner2, "HERE COMES THE %s WAVE!!", o);
+    }
+    snd(g, g->wave == NUM_WAVES ? SFX_BOSS : SFX_WAVE, 128, FIRE_X);
+}
+
+static void update_waves(Game *g, float dt)
+{
+    if (!g->wave_on) {
+        g->countdown -= dt;
+        if (g->countdown <= 0) start_wave(g);
+        return;
+    }
+    g->wave_t += dt;
+    const WaveDef *w = &WAVES[g->wave - 1];
+    int pending = 0;
+    for (int k = 0; k < w->n; k++) {
+        const Group *gr = &w->g[k];
+        while (g->spawned[k] < gr->count && g->wave_t >= gr->delay + gr->gap * (float)g->spawned[k]) {
+            int gate;
+            if (gr->gate == GATE_CYCLE) { gate = g->gate_rr % w->gates; g->gate_rr = (g->gate_rr + 1) % w->gates; }
+            else if (gr->gate == GATE_RANDOM || gr->gate == GATE_AIR) gate = (int)(frand(g) * (float)w->gates) % w->gates;
+            else gate = gr->gate;
+            spawn_enemy(g, gr->type, gate);
+            g->spawned[k]++;
+        }
+        if (g->spawned[k] < gr->count) pending = 1;
+    }
+    if (pending) return;
+    for (int i = 0; i < MAX_EN; i++) if (g->en[i].alive) return;
+    /* wave cleared */
+    g->wave_on = 0;
+    int bonus = 15 + g->wave * 4;
+    g->gold += bonus;
+    g->gold_flash = 1.0f;
+    if (g->wave >= NUM_WAVES) {
+        g->state = ST_WIN;
+        g->end_t = 0;
+        snd(g, SFX_WIN, 128, FIRE_X);
+        return;
+    }
+    g->countdown = 14.0f;
+    g->banner_t = 0;
+    snprintf(g->banner, sizeof g->banner, "WAVE %d CLEARED", g->wave);
+    snprintf(g->banner2, sizeof g->banner2, "+%d GOLD", bonus);
+    snd(g, SFX_CLEAR, 128, FIRE_X);
+}
+
+/* ------------------------------------------------------------------ */
+/* towers                                                              */
+/* ------------------------------------------------------------------ */
+static int find_target(Game *g, float x, float z, float range, int air, int skip_mask_idx)
+{
+    int best = -1;
+    float bp = 1e9f, r2 = range * range;
+    for (int i = 0; i < MAX_EN; i++) {
+        const Enemy *e = &g->en[i];
+        if (!e->alive || i == skip_mask_idx) continue;
+        if (e->fly && !air) continue;
+        if (e->entering && e->prog > 30.0f) continue;
+        float dx = e->x - x, dz = e->z - z;
+        if (dx * dx + dz * dz > r2) continue;
+        if (e->prog < bp) { bp = e->prog; best = i; }
+    }
+    return best;
+}
+
+static void fire_tower(Game *g, int cx, int cz, Tower *t, int target)
+{
+    const TowerDef *d = &TOWERS[t->type];
+    float x = (float)cx + 0.5f, z = (float)cz + 0.5f, h = g->tile[cz][cx].h;
+    Enemy *e = &g->en[target];
+    float dmg = d->dmg[t->lvl];
+    switch (t->type) {
+    case TW_BLASTER: {
+        for (int s = 0; s < MAX_SH; s++) {
+            Shot *b = &g->sh[s];
+            if (b->alive) continue;
+            memset(b, 0, sizeof *b);
+            b->alive = 1; b->kind = SH_BOLT; b->target = target; b->dmg = dmg; b->lvl = t->lvl;
+            float ca = cosf(t->ang), sa = sinf(t->ang);
+            float side = (t->lvl == 2) ? ((g->kills + (int)(t->anim * 10)) & 1 ? 0.09f : -0.09f) : 0.0f;
+            b->x = x + ca * 0.42f - sa * side; b->z = z + sa * 0.42f + ca * side; b->y = h + 0.42f;
+            float ex = e->x - b->x, ey = e->y + 0.25f - b->y, ez = e->z - b->z, l = sqrtf(ex * ex + ey * ey + ez * ez) + 0.001f;
+            b->vx = ex / l * 11.0f; b->vy = ey / l * 11.0f; b->vz = ez / l * 11.0f;
+            b->t = 0; b->dur = 1.2f;
+            break;
+        }
+        t->recoil = 1.0f;
+        flight(g, x + cosf(t->ang) * 0.45f, h + 0.45f, z + sinf(t->ang) * 0.45f, d->glow, 0.5f, 1.4f, 0.08f);
+        snd(g, SFX_BLASTER, 118 + (int)(frand(g) * 22) + t->lvl * 6, x);
+        break;
+    }
+    case TW_MORTAR: {
+        for (int s = 0; s < MAX_SH; s++) {
+            Shot *b = &g->sh[s];
+            if (b->alive) continue;
+            memset(b, 0, sizeof *b);
+            b->alive = 1; b->kind = SH_SHELL; b->dmg = dmg; b->splash = d->extra[t->lvl]; b->lvl = t->lvl;
+            b->sx = x; b->sy = h + 0.75f; b->sz = z;
+            b->dur = 1.05f;
+            /* lead the target: guess where it will be when the shell lands */
+            float spd = e->speed * (1.0f - e->slow_amt);
+            float dx = e->tx - e->x, dz = e->tz - e->z, dl = sqrtf(dx * dx + dz * dz);
+            float lead = spd * b->dur * 0.85f;
+            if (dl > 0.001f) { if (lead > dl + 0.3f) lead = dl + 0.3f; b->ex = e->x + dx / dl * lead; b->ez = e->z + dz / dl * lead; }
+            else { b->ex = e->x; b->ez = e->z; }
+            b->x = b->sx; b->y = b->sy; b->z = b->sz;
+            break;
+        }
+        t->recoil = 1.0f;
+        smoke(g, x, h + 0.8f, z, 3, 0.25f, 0x50505070);
+        flight(g, x, h + 0.9f, z, d->glow, 1.0f, 2.0f, 0.15f);
+        snd(g, SFX_MORTAR, 120 + (int)(frand(g) * 16), x);
+        break;
+    }
+    case TW_FROST: {
+        float r = d->range[t->lvl], r2 = r * r, slow = d->extra[t->lvl];
+        for (int i = 0; i < MAX_EN; i++) {
+            Enemy *o = &g->en[i];
+            if (!o->alive) continue;
+            float dx = o->x - x, dz = o->z - z;
+            if (dx * dx + dz * dz > r2) continue;
+            if (o->slow_amt < slow) o->slow_amt = slow;
+            if (o->type == EN_GOLEM && o->slow_amt > 0.3f) o->slow_amt = 0.3f;
+            o->slow_t = 1.7f;
+            hurt(g, i, dmg);
+        }
+        ring(g, x, 0.05f, z, 0.3f, r, 0.55f, 0x90E8FFC0);
+        ring(g, x, h + 0.05f, z, 0.2f, 0.9f, 0.35f, 0xD0F8FFFF);
+        for (int k = 0; k < 10; k++) {
+            Part *p = part(g, PT_FLAKE, x, h + 0.9f, z);
+            float a = frand(g) * TAU, s = 1.0f + frand(g) * 2.0f;
+            p->vx = cosf(a) * s; p->vz = sinf(a) * s; p->vy = frand2(g) * 0.5f;
+            p->life = p->max = 0.6f + frand(g) * 0.4f; p->size = 0.06f; p->c = 0xD8FCFFFF;
+        }
+        t->pulse = 1.0f;
+        flight(g, x, h + 1.0f, z, d->glow, 1.0f, r + 0.5f, 0.3f);
+        snd(g, SFX_FROST, 116 + (int)(frand(g) * 20), x);
+        break;
+    }
+    case TW_TESLA: {
+        int hit[8], nh = 0, chains = (int)d->extra[t->lvl];
+        int cur = target;
+        float from[3] = { x, h + 1.15f, z };
+        float dm = dmg;
+        while (cur >= 0 && nh < chains) {
+            Enemy *o = &g->en[cur];
+            float to[3] = { o->x, o->y + ENEMIES[o->type].size * 0.8f, o->z };
+            make_arc(g, from, to, 0xFFF4A0FF, 0.2f, 0, 0.18f);
+            sparks(g, to[0], to[1], to[2], 5, 0xFFF0A0FF, 2.0f);
+            o->zap_t = 0.25f;
+            hit[nh++] = cur;
+            memcpy(from, to, sizeof from);
+            float px = o->x, pz = o->z;
+            hurt(g, cur, dm);
+            dm *= 0.85f;
+            /* jump to the nearest enemy not hit yet */
+            int nb = -1;
+            float bd = 1.7f * 1.7f;
+            for (int i = 0; i < MAX_EN; i++) {
+                const Enemy *q = &g->en[i];
+                if (!q->alive) continue;
+                int used = 0;
+                for (int k = 0; k < nh; k++) if (hit[k] == i) used = 1;
+                if (used) continue;
+                float ddx = q->x - px, ddz = q->z - pz, dd = ddx * ddx + ddz * ddz;
+                if (dd < bd) { bd = dd; nb = i; }
+            }
+            cur = nb;
+        }
+        flight(g, x, h + 1.2f, z, d->glow, 1.4f, 2.6f, 0.18f);
+        t->pulse = 1.0f;
+        snd(g, SFX_ZAP, 112 + (int)(frand(g) * 30), x);
+        break;
+    }
+    }
+}
+
+static void update_towers(Game *g, float dt)
+{
+    for (int cz = 0; cz < MH; cz++)
+        for (int cx = 0; cx < MW; cx++) {
+            Tower *t = &g->tw[cz][cx];
+            if (t->type < 0) continue;
+            const TowerDef *d = &TOWERS[t->type];
+            t->anim += dt;
+            t->built += dt * 2.5f; if (t->built > 1) t->built = 1;
+            t->recoil -= dt * 5.0f; if (t->recoil < 0) t->recoil = 0;
+            t->pulse -= dt * 2.5f; if (t->pulse < 0) t->pulse = 0;
+            t->cd -= dt;
+            float x = (float)cx + 0.5f, z = (float)cz + 0.5f;
+            int tg = find_target(g, x, z, d->range[t->lvl], d->air, -1);
+            t->target = tg;
+            if (tg >= 0) {
+                float want = atan2f(g->en[tg].z - z, g->en[tg].x - x), da = want - t->ang;
+                while (da > 3.14159f) da -= TAU;
+                while (da < -3.14159f) da += TAU;
+                t->ang += da * clampf(dt * 12.0f, 0, 1);
+                if (t->cd <= 0 && t->built >= 1.0f && (t->type != TW_BLASTER || fabsf(da) < 0.6f)) {
+                    fire_tower(g, cx, cz, t, tg);
+                    t->cd = 1.0f / d->rate[t->lvl];
+                }
+            } else {
+                t->ang += dt * 0.4f;            /* idle: slowly scan */
+                if (t->cd < 0) t->cd = 0;
+            }
+        }
+}
+
+static void update_shots(Game *g, float dt)
+{
+    for (int s = 0; s < MAX_SH; s++) {
+        Shot *b = &g->sh[s];
+        if (!b->alive) continue;
+        b->t += dt;
+        if (b->kind == SH_BOLT) {
+            Enemy *e = (b->target >= 0) ? &g->en[b->target] : NULL;
+            if (e && e->alive) {
+                float tx = e->x - b->x, ty = e->y + ENEMIES[e->type].size * 0.6f - b->y, tz = e->z - b->z;
+                float l = sqrtf(tx * tx + ty * ty + tz * tz);
+                if (l < 0.22f + ENEMIES[e->type].size * 0.4f) {
+                    hurt(g, b->target, b->dmg);
+                    sparks(g, b->x, b->y, b->z, 4, TOWERS[TW_BLASTER].glow, 1.6f);
+                    snd(g, SFX_HIT, 120 + (int)(frand(g) * 30), b->x);
+                    b->alive = 0;
+                    continue;
+                }
+                float sp = 11.0f;
+                b->vx += (tx / l * sp - b->vx) * clampf(dt * 14.0f, 0, 1);
+                b->vy += (ty / l * sp - b->vy) * clampf(dt * 14.0f, 0, 1);
+                b->vz += (tz / l * sp - b->vz) * clampf(dt * 14.0f, 0, 1);
+            }
+            b->x += b->vx * dt; b->y += b->vy * dt; b->z += b->vz * dt;
+            if (b->t > b->dur || b->y < 0.0f) { sparks(g, b->x, fmaxf(b->y, 0.05f), b->z, 3, 0x70E8FFFF, 1.0f); b->alive = 0; }
+        } else {
+            float u = b->t / b->dur;
+            if (u >= 1.0f) {
+                /* boom */
+                float r2 = b->splash * b->splash;
+                for (int i = 0; i < MAX_EN; i++) {
+                    Enemy *e = &g->en[i];
+                    if (!e->alive || e->fly) continue;
+                    float dx = e->x - b->ex, dz = e->z - b->ez, d2 = dx * dx + dz * dz;
+                    if (d2 > r2) continue;
+                    hurt(g, i, b->dmg * (1.0f - 0.5f * d2 / r2));
+                }
+                sparks(g, b->ex, 0.2f, b->ez, 16, 0xFFB050FF, 3.2f);
+                smoke(g, b->ex, 0.2f, b->ez, 5, 0.45f, 0x40404880);
+                ring(g, b->ex, 0.04f, b->ez, 0.2f, b->splash * 1.15f, 0.4f, 0xFFA040E0);
+                Part *p = part(g, PT_GLOW, b->ex, 0.35f, b->ez);
+                p->life = p->max = 0.3f; p->size = b->splash * 1.2f; p->c = 0xFF9030FF;
+                flight(g, b->ex, 0.6f, b->ez, 0xFF9040FF, 2.2f, 3.2f, 0.4f);
+                g->shake = fmaxf(g->shake, 0.25f);
+                snd(g, SFX_BOOM, 116 + (int)(frand(g) * 24), b->ex);
+                b->alive = 0;
+                continue;
+            }
+            b->x = lerpf(b->sx, b->ex, u); b->z = lerpf(b->sz, b->ez, u);
+            b->y = lerpf(b->sy, 0.1f, u) + 2.3f * 4.0f * u * (1.0f - u);
+            if (frand(g) < 0.7f) {
+                Part *p = part(g, PT_EMBER, b->x, b->y, b->z);
+                p->vx = frand2(g) * 0.3f; p->vy = frand2(g) * 0.3f; p->vz = frand2(g) * 0.3f;
+                p->life = p->max = 0.35f; p->size = 0.07f; p->c = 0xFF8030FF;
+            }
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* particles, rain, storm                                              */
+/* ------------------------------------------------------------------ */
+static float surface_h(const Game *g, float x, float z)
+{
+    int c = (int)floorf(x), r = (int)floorf(z);
+    if (c < 0 || r < 0 || c >= MW || r >= MH) return 0.0f;
+    return g->tile[r][c].h;
+}
+
+static void update_particles(Game *g, float dt)
+{
+    for (int i = 0; i < MAX_PT; i++) {
+        Part *p = &g->pt[i];
+        if (p->life <= 0) continue;
+        p->life -= dt;
+        switch (p->kind) {
+        case PT_SPARK:
+            p->vy -= 9.0f * dt;
+            p->x += p->vx * dt; p->y += p->vy * dt; p->z += p->vz * dt;
+            if (p->y < 0) { p->y = 0; p->vy *= -0.3f; p->vx *= 0.6f; p->vz *= 0.6f; }
+            break;
+        case PT_DEBRIS: {
+            p->vy -= 11.0f * dt;
+            p->x += p->vx * dt; p->y += p->vy * dt; p->z += p->vz * dt;
+            p->rot += p->vr * dt;
+            float h = surface_h(g, p->x, p->z);
+            if (p->y < h + p->size * 0.5f) { p->y = h + p->size * 0.5f; p->vy *= -0.35f; p->vx *= 0.6f; p->vz *= 0.6f; p->vr *= 0.6f; }
+            break;
+        }
+        case PT_EMBER:
+            p->vy += 0.8f * dt;
+            p->x += (p->vx + g->wind * 0.4f) * dt; p->y += p->vy * dt; p->z += p->vz * dt;
+            break;
+        case PT_SMOKE: case PT_STEAM:
+            p->x += (p->vx + g->wind * 0.3f) * dt; p->y += p->vy * dt; p->z += p->vz * dt;
+            p->size += dt * 0.35f;
+            break;
+        case PT_FLAKE:
+            p->vx *= 1.0f - dt * 3.0f; p->vz *= 1.0f - dt * 3.0f; p->vy -= 0.8f * dt;
+            p->x += p->vx * dt; p->y += p->vy * dt; p->z += p->vz * dt;
+            break;
+        default: break;
+        }
+    }
+    for (int i = 0; i < MAX_POP; i++) if (g->pop[i].t < 1.0f) { g->pop[i].t += dt * 0.9f; g->pop[i].y += dt * 0.8f; }
+    for (int i = 0; i < MAX_FL; i++) if (g->fl[i].t < g->fl[i].life) g->fl[i].t += dt;
+    for (int i = 0; i < MAX_ARC; i++) {
+        Arc *a = &g->arc[i];
+        if (!a->alive) continue;
+        a->t += dt;
+        if (a->t >= a->life) { a->alive = 0; continue; }
+        if (!a->storm && frand(g) < 0.5f)             /* tesla arcs crackle */
+            for (int k = 1; k < a->n - 1; k++) { a->p[k][0] += frand2(g) * 0.06f; a->p[k][1] += frand2(g) * 0.04f; a->p[k][2] += frand2(g) * 0.06f; }
+    }
+}
+
+static void reset_drop(Game *g, Drop *d, int top)
+{
+    d->x = -4.0f + frand(g) * 27.0f;
+    d->z = -4.0f + frand(g) * 21.0f;
+    d->y = top ? 6.0f + frand(g) * 2.0f : frand(g) * 8.0f;
+    d->len = 0.35f + frand(g) * 0.35f;
+}
+
+static void update_rain(Game *g, float dt)
+{
+    for (int i = 0; i < MAX_DROP; i++) {
+        Drop *d = &g->drop[i];
+        d->y -= 14.0f * dt;
+        d->x += g->wind * 2.2f * dt;
+        float h = surface_h(g, d->x, d->z);
+        if (d->y <= h) {
+            if (d->x > -1 && d->x < MW + 1 && d->z > -1 && d->z < MH + 1 && (i & 1)) {
+                Part *p = part(g, PT_SPLASH, d->x, h + 0.01f, d->z);
+                p->life = p->max = 0.22f; p->size = 0.11f + frand(g) * 0.06f; p->c = 0xB4C8F060;
+            }
+            reset_drop(g, d, 1);
+        }
+    }
+}
+
+static void lightning_strike(Game *g)
+{
+    float x, z;
+    int target = -1;
+    if (g->state == ST_PLAY && frand(g) < 0.45f) {
+        int n = 0;
+        for (int i = 0; i < MAX_EN; i++) if (g->en[i].alive && !g->en[i].entering) n++;
+        if (n > 0) {
+            int pick = (int)(frand(g) * n) % n;
+            for (int i = 0; i < MAX_EN; i++) if (g->en[i].alive && !g->en[i].entering) { if (pick-- == 0) { target = i; break; } }
+        }
+    }
+    if (target >= 0) { x = g->en[target].x; z = g->en[target].z; }
+    else {
+        /* somewhere in the woods round the edge */
+        float a = frand(g) * TAU;
+        x = FIRE_X + cosf(a) * (8.5f + frand(g) * 3.0f);
+        z = FIRE_Z + sinf(a) * (5.8f + frand(g) * 2.0f);
+    }
+    float top[3] = { x + frand2(g) * 3.0f - 2.0f, 11.0f, z - 4.0f - frand(g) * 3.0f };
+    float bot[3] = { x, surface_h(g, x, z) + 0.05f, z };
+    make_arc(g, top, bot, 0xE8F0FFFF, 0.45f, 1, 0.9f);
+    /* a side branch */
+    float mid[3] = { (top[0] + bot[0]) * 0.5f, (top[1] + bot[1]) * 0.55f, (top[2] + bot[2]) * 0.5f };
+    float br[3] = { mid[0] + frand2(g) * 2.5f, mid[1] - 2.5f - frand(g) * 2.0f, mid[2] + frand2(g) * 1.5f };
+    make_arc(g, mid, br, 0xC8D8FFFF, 0.3f, 1, 0.5f);
+    sparks(g, x, bot[1], z, 24, 0xD8E8FFFF, 3.5f);
+    ring(g, x, bot[1] + 0.02f, z, 0.2f, 1.8f, 0.5f, 0xC0D8FFE0);
+    smoke(g, x, bot[1] + 0.1f, z, 4, 0.4f, 0x30304060);
+    flight(g, x, 1.2f, z, 0xD0E0FFFF, 1.7f, 4.5f, 0.6f);
+    g->strike_x = x; g->strike_z = z;
+    g->flash_t = 0;
+    g->shake = fmaxf(g->shake, 0.55f);
+    g->thunder_t = 0.12f + frand(g) * 0.35f;
+    g->thunder_big = 1;
+    if (target >= 0) {
+        float dmg = g->en[target].type == EN_GOLEM ? 120.0f : 90.0f;
+        hurt(g, target, dmg);
+    }
+}
+
+static void update_storm(Game *g, float dt)
+{
+    g->wind = 0.55f + 0.35f * sinf(g->time * 0.31f) + 0.15f * sinf(g->time * 1.7f);
+    g->flash_t += dt;
+    float t = g->flash_t;
+    /* the classic double / triple flicker of a nearby strike */
+    float f = expf(-t * 10.0f) + 0.75f * expf(-fabsf(t - 0.14f) * 30.0f) + 0.45f * expf(-fabsf(t - 0.32f) * 22.0f);
+    g->flash = clampf(f, 0, 1.1f);
+    g->storm_t -= dt;
+    if (g->storm_t <= 0) {
+        if (frand(g) < 0.3f) {
+            /* distant sheet lightning: a soft flash and a far rumble, no bolt */
+            g->flash_t = 0.22f;
+            g->thunder_t = 0.6f + frand(g) * 0.8f;
+            g->thunder_big = 0;
+            g->storm_t = 3.0f + frand(g) * 4.0f;
+        } else {
+            lightning_strike(g);
+            g->storm_t = (g->state == ST_TITLE ? 4.0f : 7.0f) + frand(g) * 8.0f;
+        }
+    }
+    if (g->thunder_t > 0) {
+        g->thunder_t -= dt;
+        if (g->thunder_t <= 0) {
+            if (g->thunder_big) snd(g, SFX_CRACK, 120 + (int)(frand(g) * 16), g->strike_x);
+            snd(g, SFX_THUNDER, (g->thunder_big ? 118 : 100) + (int)(frand(g) * 20), g->strike_x);
+        }
+    }
+    g->shake -= dt * 2.2f;
+    if (g->shake < 0) g->shake = 0;
+}
+
+static void update_fire(Game *g, float dt)
+{
+    float want = g->state == ST_LOSE ? 0.0f : clampf((float)g->fire / (float)FIRE_HP, 0.0f, 1.0f) * 0.75f + 0.25f;
+    if (g->state == ST_TITLE) want = 1.0f;
+    g->fire_vis += (want - g->fire_vis) * clampf(dt * 2.0f, 0, 1);
+    g->fire_hit -= dt * 1.5f; if (g->fire_hit < 0) g->fire_hit = 0;
+    if (g->fire_vis > 0.05f && frand(g) < dt * 22.0f * g->fire_vis) {
+        Part *p = part(g, PT_EMBER, FIRE_X + frand2(g) * 0.35f, 0.5f, FIRE_Z + frand2(g) * 0.35f);
+        p->vx = frand2(g) * 0.4f; p->vz = frand2(g) * 0.4f; p->vy = 1.0f + frand(g) * 1.4f;
+        p->life = p->max = 0.9f + frand(g) * 1.0f; p->size = 0.045f + frand(g) * 0.04f; p->c = 0xFFA040FF;
+    }
+    if (g->fire_vis > 0.05f && frand(g) < dt * 3.0f)
+        smoke(g, FIRE_X, 1.1f + g->fire_vis * 0.5f, FIRE_Z, 1, 0.35f, 0x30303850);
+}
+
+/* ------------------------------------------------------------------ */
+/* game flow                                                           */
+/* ------------------------------------------------------------------ */
+static void new_game(Game *g)
+{
+    map_load(g);
+    for (int r = 0; r < MH; r++) for (int c = 0; c < MW; c++) { memset(&g->tw[r][c], 0, sizeof(Tower)); g->tw[r][c].type = -1; }
+    memset(g->en, 0, sizeof g->en);
+    memset(g->sh, 0, sizeof g->sh);
+    memset(g->arc, 0, sizeof g->arc);
+    g->gold = START_GOLD;
+    g->fire = FIRE_HP;
+    g->cx = 6; g->cz = 4;
+    g->cur_x = (float)g->cx; g->cur_z = (float)g->cz;
+    g->sel = 0;
+    g->fast = 0;
+    g->wave = 0; g->wave_on = 0; g->countdown = 30.0f;
+    g->gate_rr = 0;
+    g->leaked = 0; g->kills = 0;
+    g->boss = -1;
+    g->t = 0;
+    g->banner_t = 0;
+    snprintf(g->banner, sizeof g->banner, "WAVE 1/%d", NUM_WAVES);
+    snprintf(g->banner2, sizeof g->banner2, "PREPARE FOR 1ST WAVE!!");
+    g->state = ST_PLAY;
+}
+
+void game_init(Game *g)
+{
+    memset(g, 0, sizeof *g);
+    g->rng = 0x9E3779B9u;
+    audio_init();
+    map_load(g);
+    for (int r = 0; r < MH; r++) for (int c = 0; c < MW; c++) g->tw[r][c].type = -1;
+    for (int i = 0; i < MAX_DROP; i++) reset_drop(g, &g->drop[i], 0);
+    for (int i = 0; i < MAX_POP; i++) g->pop[i].t = 1.0f;
+    g->state = ST_TITLE;
+    g->storm_t = 1.5f;
+    g->flash_t = 10.0f;
+    g->fire_vis = 1.0f;
+    g->boss = -1;
+    /* a few towers for the title screen backdrop */
+    static const int demo[][3] = { {6, 4, TW_BLASTER}, {11, 5, TW_TESLA}, {13, 7, TW_MORTAR}, {3, 7, TW_FROST}, {16, 7, TW_BLASTER}, {7, 9, TW_MORTAR} };
+    for (unsigned i = 0; i < sizeof demo / sizeof demo[0]; i++) {
+        Tower *t = &g->tw[demo[i][1]][demo[i][0]];
+        t->type = (int8_t)demo[i][2]; t->built = 1; t->ang = (float)i * 1.3f; t->lvl = (uint8_t)(i % 3);
+    }
+}
+
+static void move_cursor(Game *g, int dx, int dz)
+{
+    int nx = g->cx + dx, nz = g->cz + dz;
+    if (nx < 1) nx = 1; if (nx > MW - 2) nx = MW - 2;
+    if (nz < 1) nz = 1; if (nz > MH - 2) nz = MH - 2;
+    if (nx != g->cx || nz != g->cz) { g->cx = nx; g->cz = nz; snd(g, SFX_MOVE, 128, (float)nx); }
+}
+
+static void play_input(Game *g, const Input *in, float dt)
+{
+    /* cursor: d-pad with key repeat, or the stick */
+    uint32_t dirs = in->held & (BTN_UP | BTN_DOWN | BTN_LEFT | BTN_RIGHT);
+    int dx = 0, dz = 0;
+    if (in->pressed & BTN_LEFT) dx = -1;
+    if (in->pressed & BTN_RIGHT) dx = 1;
+    if (in->pressed & BTN_UP) dz = -1;
+    if (in->pressed & BTN_DOWN) dz = 1;
+    if (dx || dz) { move_cursor(g, dx, dz); g->rep_t = 0.28f; g->rep_dir = dirs; }
+    else if (dirs) {
+        g->rep_t -= dt;
+        if (g->rep_t <= 0) {
+            g->rep_t = 0.085f;
+            move_cursor(g, (dirs & BTN_LEFT) ? -1 : ((dirs & BTN_RIGHT) ? 1 : 0), (dirs & BTN_UP) ? -1 : ((dirs & BTN_DOWN) ? 1 : 0));
+        }
+    }
+    float m = sqrtf(in->sx * in->sx + in->sy * in->sy);
+    if (m > 0.45f) {
+        g->stick_t -= dt;
+        if (g->stick_t <= 0) {
+            int sx = fabsf(in->sx) > 0.38f ? (in->sx > 0 ? 1 : -1) : 0;
+            int sz = fabsf(in->sy) > 0.38f ? (in->sy > 0 ? 1 : -1) : 0;
+            move_cursor(g, sx, sz);
+            g->stick_t = 0.17f - 0.08f * clampf((m - 0.45f) / 0.5f, 0, 1);
+        }
+    } else g->stick_t = 0;
+
+    if (in->pressed & BTN_X) { g->sel = (g->sel + TW_TYPES - 1) % TW_TYPES; g->sel_t = 1.0f; snd(g, SFX_SELECT, 120, FIRE_X); }
+    if (in->pressed & BTN_Y) { g->sel = (g->sel + 1) % TW_TYPES; g->sel_t = 1.0f; snd(g, SFX_SELECT, 136, FIRE_X); }
+    if (in->pressed & BTN_L) { g->fast = !g->fast; snd(g, SFX_SELECT, g->fast ? 150 : 105, FIRE_X); }
+
+    Tower *t = &g->tw[g->cz][g->cx];
+    float tx = (float)g->cx + 0.5f, tz = (float)g->cz + 0.5f, th = g->tile[g->cz][g->cx].h;
+    if (in->pressed & BTN_A) {
+        if (t->type >= 0) {
+            if (t->lvl + 1 < TW_MAXLVL && g->gold >= tower_cost(t->type, t->lvl + 1)) {
+                int c = tower_cost(t->type, t->lvl + 1);
+                g->gold -= c; t->spent += (float)c; t->lvl++; t->built = 0.35f;
+                sparks(g, tx, th + 0.6f, tz, 18, TOWERS[t->type].glow, 2.4f);
+                ring(g, tx, th + 0.03f, tz, 0.2f, 1.0f, 0.45f, TOWERS[t->type].glow);
+                flight(g, tx, th + 1.0f, tz, TOWERS[t->type].glow, 1.5f, 2.5f, 0.4f);
+                snd(g, SFX_UPGRADE, 128, tx);
+            } else { g->err_t = 1.0f; snd(g, SFX_ERROR, 128, tx); }
+        } else if (can_build(g, g->cx, g->cz) && g->gold >= tower_cost(g->sel, 0)) {
+            int c = tower_cost(g->sel, 0);
+            g->gold -= c;
+            memset(t, 0, sizeof *t);
+            t->type = (int8_t)g->sel; t->spent = (float)c; t->target = -1; t->ang = -1.5708f;
+            debris(g, tx, th + 0.2f, tz, 6, 0x8C8C9CFF, 0.1f);
+            ring(g, tx, th + 0.03f, tz, 0.2f, 0.9f, 0.4f, 0xFFFFFFA0);
+            smoke(g, tx, th + 0.1f, tz, 4, 0.3f, 0x60607080);
+            snd(g, SFX_BUILD, 128, tx);
+        } else { g->err_t = 1.0f; snd(g, SFX_ERROR, 128, tx); }
+    }
+    if ((in->pressed & BTN_B) && t->type >= 0) {
+        int v = tower_sell_value(t);
+        g->gold += v;
+        char s[12];
+        snprintf(s, sizeof s, "+%d", v);
+        popup(g, tx, th + 1.0f, tz, s, 0xFFD860FF);
+        debris(g, tx, th + 0.4f, tz, 8, TOWERS[t->type].color, 0.12f);
+        smoke(g, tx, th + 0.2f, tz, 5, 0.35f, 0x60607080);
+        t->type = -1;
+        snd(g, SFX_SELL, 128, tx);
+    }
+    if ((in->pressed & BTN_R) && !g->wave_on && g->wave < NUM_WAVES) {
+        int bonus = (int)g->countdown;
+        if (bonus > 0) {
+            g->gold += bonus;
+            char s[12];
+            snprintf(s, sizeof s, "+%d", bonus);
+            popup(g, FIRE_X, 1.8f, FIRE_Z, s, 0xFFD860FF);
+            snd(g, SFX_COIN, 128, FIRE_X);
+        }
+        g->countdown = 0;
+        start_wave(g);
+    }
+    if (in->pressed & BTN_PLUS) { g->state = ST_PAUSE; g->menu = 0; snd(g, SFX_PAUSE, 128, FIRE_X); }
+}
+
+void game_update(Game *g, const Input *in, float dt)
+{
+    g->time += dt;
+    g->gold_flash -= dt * 2.0f; if (g->gold_flash < 0) g->gold_flash = 0;
+    g->fire_flash -= dt * 1.5f; if (g->fire_flash < 0) g->fire_flash = 0;
+    g->err_t -= dt * 2.5f; if (g->err_t < 0) g->err_t = 0;
+    g->sel_t -= dt * 3.0f; if (g->sel_t < 0) g->sel_t = 0;
+    g->banner_t += dt;
+    g->cur_x += ((float)g->cx - g->cur_x) * clampf(dt * 20.0f, 0, 1);
+    g->cur_z += ((float)g->cz - g->cur_z) * clampf(dt * 20.0f, 0, 1);
+
+    if (g->state != ST_PAUSE) {
+        update_storm(g, dt);
+        update_rain(g, dt);
+        update_fire(g, dt);
+        update_particles(g, dt);
+    }
+
+    switch (g->state) {
+    case ST_TITLE:
+        for (int r = 0; r < MH; r++) for (int c = 0; c < MW; c++) if (g->tw[r][c].type >= 0) g->tw[r][c].ang += dt * 0.5f;
+        if (in->pressed & (BTN_A | BTN_PLUS)) { new_game(g); snd(g, SFX_START, 128, FIRE_X); }
+        break;
+    case ST_PLAY:
+        g->t += dt;
+        play_input(g, in, dt);
+        if (g->state != ST_PLAY) break;
+        update_waves(g, dt);
+        if (g->state != ST_PLAY) break;
+        update_towers(g, dt);
+        update_shots(g, dt);
+        update_enemies(g, dt);
+        break;
+    case ST_PAUSE:
+        if (in->pressed & (BTN_UP | BTN_DOWN)) { g->menu ^= 1; snd(g, SFX_MOVE, 128, FIRE_X); }
+        if ((in->pressed & BTN_PLUS) || ((in->pressed & BTN_A) && g->menu == 0)) { g->state = ST_PLAY; snd(g, SFX_PAUSE, 150, FIRE_X); }
+        else if ((in->pressed & BTN_A) && g->menu == 1) { new_game(g); snd(g, SFX_START, 128, FIRE_X); }
+        break;
+    case ST_WIN: case ST_LOSE:
+        g->end_t += dt;
+        update_shots(g, dt);
+        for (int i = 0; i < MAX_EN; i++) if (g->en[i].alive) g->en[i].anim += dt * 3.0f;
+        if (g->end_t > 2.0f && (in->pressed & (BTN_A | BTN_PLUS))) { new_game(g); snd(g, SFX_START, 128, FIRE_X); }
+        break;
+    }
+}
