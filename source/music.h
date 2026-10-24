@@ -7,6 +7,8 @@
  *   1  Autumn Gold   - fresh and simple: plucked guitar arpeggios, a gentle flute, light shaker
  *   2  Hallows Eve   - fun and spooky: bouncy pizzicato bass, a wobbly theremin tune, celesta,
  *                      finger snaps and xylophone "bones"
+ *   3  Dawn Isle     - slow and mysterious: airy pads, a sparse echoing piano, wind chimes, a low drone
+ *                      and the wind
  */
 #ifndef MUSIC_H
 #define MUSIC_H
@@ -14,7 +16,7 @@
 #include <stdint.h>
 
 #define MUS_RATE   22050
-#define MUS_TRACKS 3
+#define MUS_TRACKS 4
 
 void           music_init(void);            /* compose + render every track (call once) */
 const int16_t *music_data(int track);

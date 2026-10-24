@@ -325,6 +325,9 @@ static void screenshots(void)
     for (int i = 0; i < 60 * 14; i++) { step(G, &NONE); if (G->storm_t < 1) G->storm_t = 99; if (G->fire < 5) G->fire = 20; }
     G->flash_t = 10;
     SHOT("action");
+    G->glitch = 0.09f; G->shake = 0.6f; G->punch = 1.0f;     /* a mortar impact frame: shake, glitch, punch */
+    SHOT("impact");
+    G->glitch = 0; G->shake = 0; G->punch = 0;
     if (G->lv->env == ENV_STORM) {
         /* a lightning strike */
         G->storm_t = 0;

@@ -93,6 +93,9 @@ void rc_relight(float t, float wind); /* sample the lights for every cached poin
 /* record the next shapes as swaying: amp world units at y1, nothing at y0 (trees in the wind) */
 void rc_sway(float amp, float y0, float y1);
 int  rc_last_point(void);             /* light point of the last r_light_model while recording */
+/* shadows that grow and shrink with the sun: record with r_ground_stretch, then set the length each frame */
+void r_ground_stretch(int n, const float (*p)[3], const float *w, float dx, float dz, uint32_t c);
+void rc_set_stretch(float k);
 float rc_sway_of(int point);          /* that point's sway this frame, -1..1 times the wind */
 void rc_draw(int slot, float shx, float shy);
 extern int rc_recording;

@@ -19,12 +19,14 @@ static float flat_l[3];
 #define RC_MAXV 60000
 #define RC_MAXP 6000
 #define RC_SLOTS 32
-typedef struct { float x, y, r, g, b, f, sw; uint16_t li; uint8_t a, pad; } CVtx;   /* sw: sway in pixels */
+typedef struct { float x, y, r, g, b, f, sw, dx, dy; uint16_t li; uint8_t a, pad; } CVtx;   /* sw: sway in pixels; dx,dy: stretch */
 static CVtx  rcv[RC_MAXV];
 static float rcp[RC_MAXP][3];          /* light sample points */
 static float rcl[RC_MAXP][3];          /* their light this frame */
 static float rcs[RC_MAXP];             /* their sway this frame (-1..1, times the wind) */
 static float sw_amp, sw_y0, sw_y1 = 1;  /* sway being recorded: world units at the top, from y0 to y1 */
+static float rc_stretch = 1.0f;          /* how long the stretchable shadows are this frame */
+static float st_dx, st_dy;               /* stretch of the vertex being recorded */
 static int   rc_np, rc_cur_slot;
 static int   rc_start[RC_SLOTS], rc_count[RC_SLOTS];
 static int   rc_flat_idx = -1;
@@ -61,7 +63,29 @@ void rc_slot(int slot) { rc_cur_slot = slot; rc_start[slot] = rc_verts; rc_count
 void rc_end(void) { rc_recording = 0; }
 
 void rc_sway(float amp, float y0, float y1) { sw_amp = amp; sw_y0 = y0; sw_y1 = y1 > y0 + 0.01f ? y1 : y0 + 0.01f; }
+static void rc_vert(float sx, float sy, uint32_t c, float f, int li, float sw);
 int  rc_last_point(void) { return rc_flat_idx; }
+void rc_set_stretch(float k) { rc_stretch = k; }
+
+/* a flat polygon on the ground whose corners can slide along dir (scaled by w[i]) as rc_set_stretch changes;
+ * recorded at stretch 0 (the corner sits at p[i]) */
+void r_ground_stretch(int n, const float (*p)[3], const float *w, float dx, float dz, uint32_t c)
+{
+    if (!rc_recording || n > 8) return;
+    float sx[8], sy[8], ox[8], oy[8];
+    int li = rc_flat_idx >= 0 ? rc_flat_idx : rc_point(p[0][0], 0, p[0][2], 1);
+    for (int i = 0; i < n; i++) {
+        proj(p[i][0], p[i][1], p[i][2], &sx[i], &sy[i]);
+        float ex, ey;
+        proj(p[i][0] + dx * w[i], p[i][1], p[i][2] + dz * w[i], &ex, &ey);
+        ox[i] = ex - sx[i]; oy[i] = ey - sy[i];
+    }
+    for (int i = 1; i + 1 < n; i++) {
+        int id[3] = { 0, i, i + 1 };
+        for (int k = 0; k < 3; k++) { st_dx = ox[id[k]]; st_dy = oy[id[k]]; rc_vert(sx[id[k]], sy[id[k]], c, 1.0f, li, 0); }
+    }
+    st_dx = st_dy = 0;
+}
 float rc_sway_of(int li) { return (li >= 0 && li < rc_np) ? rcs[li] : 0.0f; }
 
 static float sway_px(float x, float y, float z)
@@ -80,7 +104,7 @@ static void rc_vert(float sx, float sy, uint32_t c, float f, int li, float sw)
     CVtx *v = &rcv[rc_verts++];
     v->x = sx; v->y = sy;
     v->r = (float)(c >> 24); v->g = (float)((c >> 16) & 255); v->b = (float)((c >> 8) & 255); v->a = (uint8_t)(c & 255);
-    v->f = f; v->li = (uint16_t)li; v->sw = sw;
+    v->f = f; v->li = (uint16_t)li; v->sw = sw; v->dx = st_dx; v->dy = st_dy;
     rc_count[rc_cur_slot]++;
 }
 
@@ -108,9 +132,10 @@ void rc_draw(int slot, float shx, float shy)
         if (mb > 1.0f) b += (mb - 1.0f) * 40.0f;
         int ir = (int)r, ig = (int)g, ib = (int)b;
         if (ir > 255) ir = 255; if (ig > 255) ig = 255; if (ib > 255) ib = 255;
-        o->x = v->x + shx + v->sw * rcs[v->li]; o->y = v->y + shy;
+        o->x = v->x + shx + v->sw * rcs[v->li] + v->dx * rc_stretch; o->y = v->y + shy + v->dy * rc_stretch;
         o->c = ((uint32_t)ir << 24) | ((uint32_t)ig << 16) | ((uint32_t)ib << 8) | v->a;
     }
+    gfx_xform_n(&gfx_v[gfx_nv], n);
     gfx_nv += n;
     gfx_seg[gfx_nseg - 1].count += n;
 }

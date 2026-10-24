@@ -22,8 +22,15 @@ Pick a level on the title screen with left / right. Winning a level takes you st
    - **Bat** - small, fast flyers in swarms
    - **Gravebreaker** - armoured brute with a tombstone hammer that wrecks towers fast
    - **Ghoul King** - the boss: armoured, smashes towers, raises zombies as it walks and bursts into more
+4. **Dawn Isle** - an island of old stone and brass machines on a calm sea at sunrise. Enemies come ashore along six wooden piers, and the fire has only two doors. The sun climbs as the waves go by: rosy first light with long shadows and mist on the water, then a golden morning, then bright day, with the sun's rays, shadows and glitter on the sea changing as it rises. Rune stones glow, orreries turn, gears spin on the walls and gulls wheel overhead. The toughest enemies yet:
+   - **Automaton** - an armoured brass soldier with a wind-up key in its back
+   - **Springer** - crouches on coiled springs, then leaps down the path
+   - **Brass Moth** - flies straight at the fire and shields everything under it (extra armour)
+   - **Tinker** - a little repair-bot that heals everything nearby every few seconds - pick it off first
+   - **Sentinel** - a stone-and-brass guardian that smashes towers
+   - **Architect** - the boss: armoured, smashes towers, builds automatons as it walks, and its shockwave jams every tower nearby for a few seconds
 
-Each level has its own music (dreary for the storm, light and fresh for autumn, fun and spooky for Halloween), and big hits, smashes and boss footsteps shake the screen.
+Each level has its own music (dreary for the storm, light and fresh for autumn, fun and spooky for Halloween, slow and mysterious for the island). Battles shake the screen with a little depth parallax (the near side of the board moves more than the far side), mortar impacts glitch the picture for a moment, and every weapon has extra flourishes: blaster muzzle flashes and flying casings, mortar landing markers, fireballs and scorch marks, frost splinters and frosted-over enemies, and tesla coils that visibly charge up before they fire.
 
 ## Controls (Classic Controller)
 
@@ -56,7 +63,7 @@ Locally with devkitPro installed: `make`.
 
 ## Tests
 
-`sh tools/run_tests.sh` builds a native test harness (any C compiler; Pillow for PNG export) that checks the map, renders screenshots with a software copy of the GPU path, measures frame cost, and plays the level with bots of several skill levels. `sh tools/run_tests.sh reel 3` renders a preview video of level 3 with its music (needs ffmpeg).
+`sh tools/run_tests.sh` builds a native test harness (any C compiler; Pillow for PNG export) that checks the map, renders screenshots with a software copy of the GPU path, measures frame cost, and plays the level with bots of several skill levels. `sh tools/run_tests.sh reel 4` renders a preview video of level 4 with its music (needs ffmpeg).
 
 ## How it is made
 

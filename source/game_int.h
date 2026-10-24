@@ -14,7 +14,8 @@
 #define MH 13
 
 /* tile kinds */
-enum { TL_PATH, TL_WALL, TL_BLOCK, TL_LAWN, TL_TREE, TL_FIRE, TL_GRAVE };
+enum { TL_PATH, TL_WALL, TL_BLOCK, TL_LAWN, TL_TREE, TL_FIRE, TL_GRAVE };   /* TL_GRAVE: any non-buildable prop tile */
+enum { DECO_GRAVE, DECO_ORRERY, DECO_RUNE };   /* which prop sits on a TL_GRAVE tile (in Tile.color) */
 /* block colours (TL_BLOCK) */
 enum { BC_RED, BC_ORANGE, BC_YELLOW, BC_GREEN, BC_MINT, BC_BLUE, BC_PURPLE, BC_CYAN, BC_COUNT };
 
@@ -44,6 +45,7 @@ typedef struct {
     float cd, ang, recoil, anim, built, spent, pulse;
     int   target;
     float hp, hurt_t;       /* level 3 enemies can smash towers */
+    float stun_t;           /* level 4 boss: jammed by a shockwave, can't fire */
 } Tower;
 extern const float TOWER_HP[TW_MAXLVL];
 
@@ -51,6 +53,7 @@ extern const float TOWER_HP[TW_MAXLVL];
 enum { EN_CRAWLER, EN_GRUNT, EN_BRUTE, EN_WISP, EN_GOLEM,                    /* level 1 */
        EN_BEETLE, EN_SLIME, EN_SLIMELET, EN_FOX, EN_CROW, EN_PUMPKIN, EN_GOURD,  /* level 2 */
        EN_ZOMBIE, EN_GHOST, EN_SKELETON, EN_BAT, EN_BREAKER, EN_GHOULKING,       /* level 3 */
+       EN_AUTOMATON, EN_SPRINGER, EN_MOTH, EN_TINKER, EN_SENTINEL, EN_ARCHITECT, /* level 4 */
        EN_TYPES };
 typedef struct {
     const char *name;
@@ -88,6 +91,10 @@ typedef struct {
     uint8_t revived;        /* skeleton: already got back up once */
     float down_t;           /* skeleton: lying in a heap, about to reassemble */
     int   step_n;           /* big walkers: footstep counter (screen shake) */
+    float shield_t;         /* level 4: inside a brass moth's shield (extra armour) */
+    float heal_t;           /* tinker: until the next repair pulse */
+    float pulse_t;          /* architect: until the next tower-jamming shockwave */
+    float heal_fx;          /* just got repaired (green flash) */
 } Enemy;
 
 /* projectiles */
@@ -113,7 +120,8 @@ typedef struct {
 } Arc;
 
 /* particles */
-enum { PT_SPARK, PT_EMBER, PT_DEBRIS, PT_SMOKE, PT_SPLASH, PT_RING, PT_FLAKE, PT_GLOW, PT_STEAM };
+enum { PT_SPARK, PT_EMBER, PT_DEBRIS, PT_SMOKE, PT_SPLASH, PT_RING, PT_FLAKE, PT_GLOW, PT_STEAM,
+       PT_SCORCH, PT_FIRE, PT_SHARD };   /* scorch: mortar burn on the ground; fire: fireball puff; shard: ice splinter */
 #define MAX_PT 900
 typedef struct {
     uint8_t kind;
@@ -142,7 +150,7 @@ typedef struct { uint8_t type, count, gate; float delay, gap; } Group;
 typedef struct { int n, gates; float hpmul; Group g[MAX_GROUPS]; } WaveDef;   /* gates: how many gates this wave uses */
 
 #define NUM_GATES 6
-enum { ENV_STORM, ENV_AUTUMN, ENV_HALLOW };
+enum { ENV_STORM, ENV_AUTUMN, ENV_HALLOW, ENV_ISLAND };
 typedef struct {
     const char *name;               /* shown on the title screen */
     const char *boss_line;          /* last-wave banner */
@@ -197,6 +205,9 @@ struct Game {
     float banner_t; char banner[40]; char banner2[40];
     int   leaked, kills;
     int   leak_by[EN_TYPES];      /* stats for the test harness */
+    float sun;              /* level 4: sunrise progress 0..1, follows the waves */
+    float glitch;           /* screen glitch (mortar impacts) */
+    float punch;            /* tiny zoom punch on big hits */
     float end_t;
     int   boss;             /* index of the golem, -1 */
 

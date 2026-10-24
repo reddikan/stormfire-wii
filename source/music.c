@@ -20,13 +20,12 @@
 static int16_t MUS[MUS_TRACKS][MUS_MAX] __attribute__((aligned(32)));
 static int     mus_len[MUS_TRACKS];
 static float   mix[MUS_MAX];
-static float   wet[MUS_MAX];
 static int     N;                         /* length of the loop being built */
 static float   BEAT;                      /* seconds per beat */
 static uint32_t rng = 0x1234567u;
 static int     ready;
 
-static const uint8_t VOL[MUS_TRACKS] = { 100, 92, 96 };
+static const uint8_t VOL[MUS_TRACKS] = { 100, 92, 96, 100 };
 
 static float frnd(void)                  /* -1..1 */
 {
@@ -274,9 +273,9 @@ static void reverb(float amount, float size)
                 if (++apos[k] >= al[k]) apos[k] = 0;
                 out = y;
             }
-            if (pass) wet[i] = out;
+            /* second time round: add the reverb in place (each sample is read as dry before it is written) */
+            if (pass) mix[i] += out * amount;
         }
-    for (int i = 0; i < N; i++) mix[i] += wet[i] * amount;
 }
 
 static void begin(float bpm, int beats)
@@ -424,6 +423,77 @@ static void track_hallow(void)
     finish(2);
 }
 
+/* soft piano: like the electric piano but rounder, with a long ring */
+static void piano(float b, float dur, float m, float vel)
+{
+    int s0 = (int)(b * BEAT * SR), n = (int)((dur * BEAT + 2.5f) * SR);
+    float f = mtof(m), pc = 0, pm = 0;
+    for (int i = 0; i < n; i++) {
+        float t = (float)i / SR, idx = 0.9f * expf(-t * 5.0f);
+        float e = env_adr(i, n, 0.003f, 2.2f, 0.5f);
+        float v = sinf(TAU_F * pc + idx * sinf(TAU_F * pm)) + 0.3f * sinf(TAU_F * pc * 2.0f) * expf(-t * 1.5f) + 0.12f * sinf(TAU_F * pc * 3.0f) * expf(-t * 3.0f);
+        put(s0 + i, v * e * vel * 0.3f);
+        pc += f / SR; pc -= floorf(pc);
+        pm += f * 2.0f / SR; pm -= floorf(pm);
+    }
+}
+
+/* wind: band-passed noise that swells and fades over the loop (whole cycles, so it loops cleanly) */
+static void wind(float vel)
+{
+    float z1 = 0, z2 = 0;
+    for (int i = 0; i < N; i++) {
+        float t = (float)i / (float)N;
+        float centre = 500.0f + 350.0f * sinf(TAU_F * t * 3.0f);
+        float w = TAU_F * centre / SR, a = sinf(w) / 1.4f, cw = cosf(w), a0 = 1.0f + a;
+        float b0 = a / a0, b2 = -a / a0, a1 = -2.0f * cw / a0, a2 = (1.0f - a) / a0;
+        float x = frnd(), y = b0 * x + z1;
+        z1 = -a1 * y + z2;
+        z2 = b2 * x - a2 * y;
+        float sw = 0.35f + 0.65f * (0.5f + 0.5f * sinf(TAU_F * t * 2.0f + 1.0f));
+        put(i, y * sw * vel * 0.18f);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* 3: Dawn Isle - slow, mysterious, D lydian, 60 bpm                    */
+/* ------------------------------------------------------------------ */
+static void track_isle(void)
+{
+    begin(60, 28);
+    /* D, G(#11), Em9, Asus, D, G, Bm */
+    static const float CH[7][5] = {
+        {50, 57, 61, 64, 66}, {43, 50, 54, 59, 61}, {40, 47, 54, 57, 62}, {45, 52, 57, 59, 64},
+        {50, 57, 61, 66, 69}, {43, 50, 55, 59, 61}, {47, 54, 57, 62, 66} };
+    for (int bar = 0; bar < 7; bar++) {
+        for (int k = 0; k < 5; k++) pad((float)bar * 4, 4.6f, CH[bar][k], 0.36f, 650.0f + 80.0f * (float)k);
+        bass((float)bar * 4, 3.8f, CH[bar][0] - 12, 0.32f);
+    }
+    static const Note MEL[7][3] = {
+        { {0, 2, 74}, {2, 2, 69}, {0, 0, 0} },
+        { {0, 1, 71}, {1, 3, 66}, {0, 0, 0} },
+        { {0, 2, 67}, {2, 2, 71}, {0, 0, 0} },
+        { {0, 4, 69}, {0, 0, 0}, {0, 0, 0} },
+        { {0, 1, 74}, {1, 1, 76}, {2, 2, 73} },
+        { {0, 3, 71}, {3, 1, 74}, {0, 0, 0} },
+        { {0, 2, 73}, {2, 2, 69}, {0, 0, 0} },
+    };
+    for (int bar = 0; bar < 7; bar++)
+        for (int k = 0; k < 3; k++)
+            if (MEL[bar][k].m > 0) piano((float)bar * 4 + MEL[bar][k].b, MEL[bar][k].d, MEL[bar][k].m, 0.55f);
+    /* a quiet echo of the tune an octave up, half a beat behind */
+    for (int bar = 0; bar < 7; bar++)
+        for (int k = 0; k < 3; k++)
+            if (MEL[bar][k].m > 0) piano((float)bar * 4 + MEL[bar][k].b + 0.5f, MEL[bar][k].d, MEL[bar][k].m + 12, 0.14f);
+    /* wind chimes */
+    static const float CHIME[][2] = { {1.5f, 86}, {2.25f, 81}, {9.5f, 83}, {10.0f, 90}, {17.25f, 78}, {18.0f, 85}, {18.5f, 81}, {25.5f, 88} };
+    for (int i = 0; i < 8; i++) bell(CHIME[i][0], CHIME[i][1], 0.18f, 0.7f);
+    drone(26, 0.55f);
+    wind(0.8f);
+    reverb(0.65f, 1.45f);
+    finish(3);
+}
+
 void music_init(void)
 {
     if (ready) return;
@@ -431,6 +501,7 @@ void music_init(void)
     track_storm();
     track_autumn();
     track_hallow();
+    track_isle();
 }
 
 const int16_t *music_data(int track) { return MUS[track]; }

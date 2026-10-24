@@ -5,7 +5,7 @@
  *   .  path (enemies walk here)          F  the campfire plaza (3 x 3, always in the middle)
  *   #  wall (build on top)               t  wall with a torch
  *   ,  grass lawn (build here too)       T  forest (nothing goes here)
- *   G  graveyard (nothing goes here)
+ *   G  graveyard, O orrery, R rune stone (props: nothing goes here)
  *   r o y g m b p c   coloured blocks (build on top): red orange yellow green mint blue purple cyan
  */
 #include "game_int.h"
@@ -40,6 +40,13 @@ const EnemyDef ENEMIES[EN_TYPES] = {
     { "BAT",           34,  1.15f, 0.20f, 1,   5,   1,  0,   0, -1, 0,           0x2A2030FF,  0, 0, 0,     -1, 0, 0 },
     { "GRAVEBREAKER", 700,  0.36f, 0.50f, 0,  45,   3,  4,   0, -1, 0,           0x5C6A70FF, 40, 1.25f, 2.2f, -1, 0, 0 },
     { "GHOUL KING",  2400,  0.24f, 0.85f, 0, 250,  10,  4,   1, EN_ZOMBIE, 3,    0x7A8A5AFF, 70, 1.5f, 2.4f,  EN_ZOMBIE, 2, 7.0f },
+    /* level 4: clockwork things from the old machines of the island */
+    { "AUTOMATON",    260,  0.55f, 0.34f, 0,  16,   1,  6,   0, -1, 0,           0xC89A50FF,  0, 0, 0,     -1, 0, 0 },
+    { "SPRINGER",     130,  0.75f, 0.28f, 0,  13,   1,  0,   0, -1, 0,           0x6AA0A0FF,  0, 0, 0,     -1, 0, 0 },
+    { "BRASS MOTH",   150,  0.70f, 0.30f, 1,  15,   1,  0,   0, -1, 0,           0xD8B060FF,  0, 0, 0,     -1, 0, 0 },
+    { "TINKER",       160,  0.60f, 0.30f, 0,  16,   1,  2,   0, -1, 0,           0x8A6A9AFF,  0, 0, 0,     -1, 0, 0 },
+    { "SENTINEL",    1000,  0.33f, 0.55f, 0,  50,   3,  8,   0, -1, 0,           0x8A9088FF, 45, 1.3f, 2.4f,  -1, 0, 0 },
+    { "ARCHITECT",   3200,  0.22f, 0.90f, 0, 300,  10,  6,   1, EN_AUTOMATON, 3, 0xB08848FF, 80, 1.6f, 2.6f,  EN_AUTOMATON, 2, 8.0f },
 };
 
 const float TOWER_HP[TW_MAXLVL] = { 100, 150, 200 };
@@ -98,6 +105,25 @@ static const WaveDef WAVES3[] = {
     { 3, 6, 3.43f, { {EN_SKELETON, 26, C, 0, 0.4f}, {EN_BREAKER, 6, C, 4, 2.4f}, {EN_GHOST, 12, A, 6, 0.6f} } },
     { 5, 6, 3.78f, { {EN_GHOULKING, 1, 0, 4, 1.0f}, {EN_ZOMBIE, 14, C, 0, 1.0f}, {EN_SKELETON, 20, C, 3, 0.5f},
                      {EN_GHOST, 10, A, 10, 0.8f}, {EN_BAT, 12, A, 16, 0.4f} } },
+};
+
+/* level 4: clockwork - armoured automatons, hopping springers, brass moths that shield, tinkers that repair,
+ * sentinels that smash towers, and the Architect, whose shockwave jams towers */
+static const WaveDef WAVES4[] = {
+    /* n gates hp x  groups: {type, count, gate, delay, gap} */
+    { 2, 2, 0.82f, { {EN_AUTOMATON, 6, C, 0, 2.0f}, {EN_SPRINGER, 6, C, 6, 1.4f} } },
+    { 2, 2, 0.94f, { {EN_SPRINGER, 12, C, 0, 1.0f}, {EN_TINKER, 3, C, 6, 3.0f} } },
+    { 2, 4, 1.11f, { {EN_MOTH, 4, A, 0, 2.5f}, {EN_AUTOMATON, 10, C, 2, 1.1f} } },
+    { 3, 4, 1.31f, { {EN_TINKER, 5, C, 0, 2.0f}, {EN_SKELETON, 14, C, 2, 0.7f}, {EN_MOTH, 4, A, 8, 2.0f} } },
+    { 2, 6, 1.56f, { {EN_SENTINEL, 2, C, 0, 7.0f}, {EN_AUTOMATON, 12, C, 2, 0.9f} } },
+    { 2, 6, 1.80f, { {EN_SPRINGER, 24, C, 0, 0.5f}, {EN_MOTH, 6, A, 4, 1.2f} } },
+    { 3, 6, 2.13f, { {EN_AUTOMATON, 16, C, 0, 0.7f}, {EN_TINKER, 6, C, 4, 1.8f}, {EN_GHOST, 8, A, 8, 0.9f} } },
+    { 3, 6, 2.46f, { {EN_SENTINEL, 3, C, 0, 5.0f}, {EN_MOTH, 8, A, 3, 1.0f}, {EN_SPRINGER, 20, C, 6, 0.5f} } },
+    { 3, 6, 2.83f, { {EN_AUTOMATON, 20, C, 0, 0.55f}, {EN_TINKER, 8, C, 3, 1.4f}, {EN_BAT, 16, A, 8, 0.3f} } },
+    { 3, 6, 3.24f, { {EN_SENTINEL, 5, C, 0, 3.5f}, {EN_MOTH, 10, A, 2, 0.8f}, {EN_SKELETON, 20, C, 6, 0.45f} } },
+    { 4, 6, 3.69f, { {EN_SPRINGER, 30, C, 0, 0.35f}, {EN_AUTOMATON, 16, C, 3, 0.7f}, {EN_MOTH, 10, A, 8, 0.7f}, {EN_TINKER, 6, C, 10, 2.0f} } },
+    { 5, 6, 4.10f, { {EN_ARCHITECT, 1, 0, 4, 1.0f}, {EN_AUTOMATON, 14, C, 0, 1.0f}, {EN_TINKER, 6, C, 6, 2.5f},
+                     {EN_MOTH, 10, A, 10, 0.9f}, {EN_SPRINGER, 24, R, 16, 0.4f} } },
 };
 #undef C
 #undef R
@@ -165,6 +191,27 @@ const LevelDef LEVELS[] = {
         { {2, 0}, {12, 12}, {18, 6}, {0, 7}, {16, 0}, {4, 12} },
         WAVES3, NW(WAVES3), ENV_HALLOW, 280,
     },
+    {   "DAWN ISLE", "THE ARCHITECT AWAKENS!",
+        {   /* an island of old stone and brass machines: enemies come ashore on six piers, and the fire
+               has only two doors, east and west */
+            "TTTTTTTTT.TTTTTTTTT",
+            "T,R,#bb##.#,,R,#ccT",
+            "T,O,#.....#,O,,#...",
+            "T,,,#.#mmm#,#yy#.#T",
+            "Too##.#rr#rr#....#T",
+            "...#b.#pFFFp#.#gg#T",
+            "T#.#....FFF...#oo#T",
+            "Tg.g.#.pFFFp#....#T",
+            "Tg...#.#yyyy#.#c.#T",
+            "T#mm##.##bb##.##...",
+            "T,#....#o.....#rr#T",
+            "TR#.#ggg#.#####,O,T",
+            "TTT.TTTTT.TTTTTTTTT",
+        },
+        /* N, S, W, E, NE, SW */
+        { {9, 0}, {9, 12}, {0, 5}, {18, 9}, {18, 2}, {3, 12} },
+        WAVES4, NW(WAVES4), ENV_ISLAND, 300,
+    },
 };
 const int NUM_LEVELS = NW(LEVELS);
 
@@ -180,7 +227,9 @@ void map_load(Game *g)
             case 'F': t->kind = TL_FIRE; break;
             case ',': t->kind = TL_LAWN; break;
             case 'T': t->kind = TL_TREE; break;
-            case 'G': t->kind = TL_GRAVE; break;
+            case 'G': t->kind = TL_GRAVE; t->color = DECO_GRAVE; break;
+            case 'O': t->kind = TL_GRAVE; t->color = DECO_ORRERY; break;
+            case 'R': t->kind = TL_GRAVE; t->color = DECO_RUNE; break;
             case 't': t->kind = TL_WALL; t->torch = 1; t->h = 0.5f; break;
             case '#': t->kind = TL_WALL; t->h = 0.5f; break;
             default: {

@@ -2,7 +2,7 @@
 <app version="1">
   <name>Stormfire</name>
   <coder>Claude</coder>
-  <version>1.2</version>
+  <version>1.3</version>
   <release_date>20261023000000</release_date>
   <short_description>Stormy low-poly tower defense (Classic Controller)</short_description>
   <long_description>Keep the campfire burning. Enemies march in from every side of the forest; build and upgrade four kinds of towers on the walls and blocks to stop them.
@@ -10,6 +10,7 @@
 Level 1, The Storm: a night of rain and lightning, ending with the Storm Golem.
 Level 2, Autumn Gold: golden hour in an autumn forest with armoured beetles, splitting slimes, sprinting foxes, crows and the Pumpkin King.
 Level 3, Hallows Eve: a foggy Halloween dusk where zombies and gravebreakers smash your towers, ghosts fade out of reach, skeletons get back up, and the Ghoul King rises.
+Level 4, Dawn Isle: an island of old machines at sunrise - the sun climbs as the waves go by - with clockwork automatons, leaping springers, shielding brass moths, repairing tinkers, tower-smashing sentinels and the Architect.
 
 Every level has its own music.
 

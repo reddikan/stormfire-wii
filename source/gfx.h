@@ -51,6 +51,11 @@ void gfx_blend(int mode);
 /* view transform applied to everything: zoom about the screen centre, then offset (screen shake) */
 void gfx_view(float ox, float oy, float zoom);
 void gfx_view_reset(void);
+/* battle feel for the world layer: depth parallax on the view offset, and a slice glitch of `glitch` pixels */
+void gfx_fx(int parallax, float glitch, uint32_t seed);
+void gfx_xform(float *x, float *y);          /* the current view transform, for code that writes vertices itself */
+
+void gfx_xform_n(GVtx *v, int n);           /* apply the view transform to n vertices written directly */
 
 void gfx_tri(float x0, float y0, uint32_t c0, float x1, float y1, uint32_t c1, float x2, float y2, uint32_t c2);
 void gfx_tri1(float x0, float y0, float x1, float y1, float x2, float y2, uint32_t c);

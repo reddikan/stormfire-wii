@@ -18,8 +18,25 @@
 #define TAU 6.28318530718f
 
 static const Game *G;
+static float tw_charge;      /* tower being drawn: how close it is to firing (0..1), for charge-up glows */
 #define AUTUMN (G->lv->env == ENV_AUTUMN)
 #define HALLOW (G->lv->env == ENV_HALLOW)
+#define ISLAND (G->lv->env == ENV_ISLAND)
+
+/* level 4 props that move: orrery rings, rune glows, gears on walls; and sparkles on the sea */
+#define MAX_PROP 24
+enum { PR_ORRERY, PR_RUNE, PR_GEAR };
+typedef struct { uint8_t kind, row; float x, z, y, ph; } Prop;
+static Prop prop[MAX_PROP];
+static int nprop;
+#define MAX_GLINT 140
+typedef struct { float x, z, ph; } Glint;
+static Glint glint[MAX_GLINT];
+static int nglint;
+#define MAX_FOAM 90
+typedef struct { float x0, z0, x1, z1, ph; } Foam;
+static Foam foam[MAX_FOAM];
+static int nfoam;
 
 /* level 3 props that move: lanterns hanging from branches, glowing jack-o'-lantern faces */
 #define MAX_LANT 26
@@ -97,7 +114,13 @@ static void build_lights(void)
 {
     lt_begin();
     float fv = G->fire_vis, fl = flicker(0.0f);
-    float lk = AUTUMN ? 0.45f : (HALLOW ? 0.85f : 1.0f);   /* point lights matter less in daylight */
+    float lk = AUTUMN ? 0.45f : (HALLOW ? 0.85f : (ISLAND ? 0.6f : 1.0f));   /* point lights matter less in daylight */
+    if (ISLAND)
+        for (int i = 0; i < nprop; i++)
+            if (prop[i].kind == PR_RUNE) {
+                float k = 0.55f + 0.45f * sinf(T * 1.3f + prop[i].ph);
+                lt_add(prop[i].x, 0.5f, prop[i].z + 0.3f, 0.1f * k, 0.3f * k, 0.5f * k, 1.4f);
+            }
     if (HALLOW) {
         for (int i = 0; i < nlant; i++) {
             float k = 0.85f + 0.15f * sinf(T * 11.0f + lant[i].ph);
@@ -133,6 +156,7 @@ static void build_lights(void)
         if (e->type == EN_GOLEM) lt_add(e->x, 1.2f, e->z, 0.2f, 0.6f, 0.9f, 2.6f);
         if (e->type == EN_PUMPKIN) lt_add(e->x, 0.7f, e->z, 0.9f, 0.5f, 0.1f, 2.4f);
         if (e->type == EN_GHOULKING) lt_add(e->x, 1.2f, e->z, 0.2f, 0.7f, 0.25f, 2.6f);
+        if (e->type == EN_ARCHITECT) lt_add(e->x, 1.0f, e->z, 0.2f, 0.45f, 0.7f, 2.6f);
         if (e->type == EN_GHOST && e->dash_t <= 0) lt_add(e->x, e->y, e->z, 0.15f, 0.22f, 0.4f, 1.3f);
     }
     for (int i = 0; i < MAX_FL; i++) {
@@ -152,6 +176,19 @@ static uint32_t ground_col(int c, int r)
     int k = in_map(c, r) ? G->tile[r][c].kind : -1;
     float v = 0.92f + 0.16f * hf(c, r, 1);
     uint32_t base;
+    if (ISLAND) {                                  /* dawn-lit grass, pale flagstones, the sea all round */
+        if (in_map(c, r)) {
+            if (k == TL_PATH) base = ((c + r) & 1) ? 0xA49A80FF : 0x9C927AFF;
+            else if (k == TL_LAWN || k == TL_GRAVE) base = ((c + r) & 1) ? 0x6E8E4AFF : 0x668646FF;
+            else if (k == TL_FIRE) base = 0x8E8678FF;
+            else base = 0x6A7650FF;                    /* mossy rocks along the shore */
+        } else {
+            int near = in_map(c - 1, r) || in_map(c + 1, r) || in_map(c, r - 1) || in_map(c, r + 1);
+            base = near ? 0x3E6E84FF : 0x2C5070FF;     /* shallows, then deeper water */
+            v = 0.97f + 0.06f * hf(c, r, 1);
+        }
+        return scale_rgb(base, v);
+    }
     if (HALLOW) {                                  /* dead grass, dark dirt, graveyard earth */
         if (k == TL_PATH || (!in_map(c, r) && outside_lane(c, r))) base = 0x5E4C3EFF;
         else if (k == TL_LAWN) base = ((c + r) & 1) ? 0x5C5C3CFF : 0x54543AFF;
@@ -212,6 +249,107 @@ static void shadow_quad(float ax, float az, float bx, float bz, float h)
     r_face(4, (const float (*)[3])p, 0, 1, 0, 0x2A100078);
 }
 
+/* level 4: piers over the water at each gate, rocks along the shore, and long dawn shadows that shorten
+ * as the sun climbs (they are recorded stretchable; the stretch is set every frame) */
+#define ISL_DX 0.22f
+#define ISL_DZ 1.0f
+static void island_shadow_edge(float ax, float az, float bx, float bz, float h)
+{
+    float p[4][3] = { {ax, 0.006f, az}, {bx, 0.006f, bz}, {bx, 0.006f, bz}, {ax, 0.006f, az} };
+    float w[4] = { 0, 0, h, h };
+    r_ground_stretch(4, (const float (*)[3])p, w, ISL_DX, ISL_DZ, 0x30182068);
+}
+
+static void build_island_ground(void)
+{
+    nglint = nfoam = 0;
+    for (int r = ROW_MIN; r < ROW_MAX; r++)
+        for (int c = -5; c < MW + 5; c++) {
+            if (in_map(c, r)) continue;
+            if (!on_screen((float)c + 0.5f, 0, (float)r + 0.5f, 40.0f)) continue;
+            if (outside_lane(c, r)) {
+                /* a wooden pier: planks on posts */
+                r_light_model((float)c + 0.5f, 0.1f, (float)r + 0.5f);
+                int vert = (r < 0 || r >= MH);
+                for (int k = 0; k < 4; k++) {
+                    float a = (float)k * 0.25f;
+                    uint32_t wood = scale_rgb(0x8A6440FF, 0.85f + 0.3f * hf(c, r, 80 + k));
+                    if (vert) r_box((float)c + 0.08f, 0.04f, (float)r + a + 0.01f, (float)c + 0.92f, 0.1f, (float)r + a + 0.23f, wood, scale_rgb(wood, 0.7f), 0);
+                    else r_box((float)c + a + 0.01f, 0.04f, (float)r + 0.08f, (float)c + a + 0.23f, 0.1f, (float)r + 0.92f, wood, scale_rgb(wood, 0.7f), 0);
+                }
+                for (int k = 0; k < 2; k++) {
+                    float px = vert ? (float)c + (k ? 0.88f : 0.12f) : (float)c + 0.5f, pz = vert ? (float)r + 0.5f : (float)r + (k ? 0.88f : 0.12f);
+                    r_prism(px, -0.1f, pz, 0.05f, 0.05f, 0.18f, 5, 0, 0x5A4028FF, 0x4A3420FF);
+                }
+                r_light_off();
+                continue;
+            }
+            int near = in_map(c - 1, r) || in_map(c + 1, r) || in_map(c, r - 1) || in_map(c, r + 1);
+            if (near && hf(c, r, 90) < 0.5f) {           /* shore rocks */
+                r_light_model((float)c + 0.5f, 0.1f, (float)r + 0.5f);
+                for (int k = 0; k < 2; k++)
+                    r_crystal((float)c + 0.2f + 0.6f * hf(c, r, 91 + k), 0.04f, (float)r + 0.2f + 0.6f * hf(c, r, 93 + k), 0.14f + 0.1f * hf(c, r, 95 + k), 0.1f, 0.05f, 5, hf(c, r, 97 + k) * 3.0f, 0x7A7A70FF);
+                r_light_off();
+            }
+            if (nglint < MAX_GLINT && hf(c, r, 99) < 0.75f) {
+                Glint *gl = &glint[nglint++];
+                gl->x = (float)c + hf(c, r, 100); gl->z = (float)r + hf(c, r, 101); gl->ph = hf(c, r, 102) * 6.28f;
+            }
+            /* foam where the water meets the island */
+            if (nfoam < MAX_FOAM) {
+                if (in_map(c, r + 1)) { Foam *f = &foam[nfoam++]; f->x0 = (float)c; f->x1 = (float)c + 1; f->z0 = f->z1 = (float)r + 1; f->ph = hf(c, r, 103) * 6.28f; }
+                else if (in_map(c, r - 1) && nfoam < MAX_FOAM) { Foam *f = &foam[nfoam++]; f->x0 = (float)c; f->x1 = (float)c + 1; f->z0 = f->z1 = (float)r; f->ph = hf(c, r, 104) * 6.28f; }
+                if (in_map(c + 1, r) && nfoam < MAX_FOAM) { Foam *f = &foam[nfoam++]; f->x0 = f->x1 = (float)c + 1; f->z0 = (float)r; f->z1 = (float)r + 1; f->ph = hf(c, r, 105) * 6.28f; }
+                else if (in_map(c - 1, r) && nfoam < MAX_FOAM) { Foam *f = &foam[nfoam++]; f->x0 = f->x1 = (float)c; f->z0 = (float)r; f->z1 = (float)r + 1; f->ph = hf(c, r, 106) * 6.28f; }
+            }
+        }
+    /* shadows: walls and blocks, rune stones and orreries, shore pines */
+    for (int r = 0; r < MH; r++)
+        for (int c = 0; c < MW; c++) {
+            const Tile *t = &G->tile[r][c];
+            float h = 0;
+            if (solid(c, r)) h = t->h;
+            else if (t->kind == TL_GRAVE) h = t->color == DECO_RUNE ? 1.4f : 0.9f;
+            else if (t->kind == TL_TREE) h = 1.6f;
+            if (h <= 0) continue;
+            r_light_model((float)c + 0.5f, 0, (float)r + 0.5f);
+            if (t->kind == TL_TREE || t->kind == TL_GRAVE) {
+                /* a long narrow shadow from the base */
+                float x = (float)c + 0.5f, z = (float)r + 0.5f, wd = t->kind == TL_TREE ? 0.3f : 0.16f;
+                float p[4][3] = { {x - wd, 0.006f, z}, {x + wd, 0.006f, z}, {x + wd * 0.4f, 0.006f, z}, {x - wd * 0.4f, 0.006f, z} };
+                float w[4] = { 0, 0, h, h };
+                r_ground_stretch(4, (const float (*)[3])p, w, ISL_DX, ISL_DZ, 0x30182060);
+            } else {
+                if (!solid(c, r + 1)) island_shadow_edge((float)c, (float)r + 1, (float)c + 1, (float)r + 1, h);
+                if (!solid(c + 1, r)) island_shadow_edge((float)c + 1, (float)r, (float)c + 1, (float)r + 1, h);
+            }
+            r_light_off();
+        }
+}
+
+/* static parts of the level 4 props, and their moving parts registered for every frame */
+static void draw_island_prop(int c, int r, const Tile *t)
+{
+    float x = (float)c + 0.5f, z = (float)r + 0.5f;
+    r_light_model(x, 0.4f, z);
+    if (t->color == DECO_RUNE) {
+        /* a standing stone, carved with runes that glow */
+        r_prism(x, 0, z, 0.3f, 0.32f, 0.08f, 6, 0.3f, 0x8A8A80FF, 0x6E6E66FF);
+        r_prism(x, 0.08f, z, 0.24f, 0.16f, 1.25f, 4, 0.785f + (hf(c, r, 5) - 0.5f) * 0.3f, 0x9A9A94FF, 0x7E7E7AFF);
+        r_prism(x, 1.25f, z, 0.16f, 0.0f, 1.42f, 4, 0.785f, 0xA4A49EFF, 0x8A8A84FF);
+    } else {
+        /* an orrery on a stone plinth: the brass rings turn above it */
+        r_prism(x, 0, z, 0.4f, 0.36f, 0.16f, 8, 0.39f, 0x9C968AFF, 0x807A70FF);
+        r_prism(x, 0.16f, z, 0.1f, 0.07f, 0.62f, 6, 0, 0xB89048FF, 0x987030FF);
+    }
+    r_light_off();
+    if (nprop < MAX_PROP) {
+        Prop *p = &prop[nprop++];
+        p->kind = t->color == DECO_RUNE ? PR_RUNE : PR_ORRERY;
+        p->x = x; p->z = z; p->y = 0; p->ph = hf(c, r, 7) * 6.28f; p->row = (uint8_t)(r - ROW_MIN);
+    }
+}
+
 static void build_autumn_ground(void)
 {
     /* leaf litter */
@@ -270,9 +408,66 @@ static void build_autumn_ground(void)
 static float SHX, SHY;
 int dbg_nv[8];          /* vertex counts after each phase (for the test harness) */          /* screen shake this frame */
 
+/* sun position on screen for level 4 (rises up out of the top of the frame as the waves go by) */
+static void sun_pos(float *x, float *y)
+{
+    float s = G->sun;
+    *x = VW * (0.30f + 0.06f * s);
+    *y = 30.0f - 130.0f * s;
+}
+
+static uint32_t sun_col(int a)
+{
+    float s = G->sun;
+    int r = 255, g = (int)(120 + 120 * fminf(s * 1.6f, 1.0f)), b = (int)(80 + 150 * fmaxf(0, s - 0.3f) / 0.7f);
+    return RGBA(r, g, b, a);
+}
+
+static void draw_island_water(void)
+{
+    gfx_blend(BL_ADD);
+    float sx, sy;
+    sun_pos(&sx, &sy);
+    float s = G->sun;
+    /* the sun's glitter on the sea: strongest on the far water, in line with the sun */
+    for (int i = 0; i < nglint; i++) {
+        const Glint *gl = &glint[i];
+        float px, py;
+        proj(gl->x, 0.01f, gl->z, &px, &py);
+        float line = 1.0f - fminf(fabsf(px - sx) / 260.0f, 1.0f);
+        float far = gl->z < 0 ? 1.0f : 0.45f;
+        float tw = sinf(T * 3.1f + gl->ph) * sinf(T * 1.7f + gl->ph * 2.3f);
+        if (tw <= 0.2f) continue;
+        float k = (tw - 0.2f) * (0.35f + 0.65f * line) * far * (0.6f + 0.4f * (1.0f - s));
+        float w = (6.0f + 6.0f * line) * proj_scale(0, gl->z) / 35.0f;
+        uint32_t c = sun_col((int)(230 * k));
+        gfx_line(px - w, py, px + w, py, 1.6f, c, c);
+        gfx_line(px, py - w * 0.35f, px, py + w * 0.35f, 1.2f, c, c);
+    }
+    /* foam lapping the shore */
+    for (int i = 0; i < nfoam; i++) {
+        const Foam *f = &foam[i];
+        float k = 0.5f + 0.5f * sinf(T * 1.4f + f->ph);
+        float push = 0.06f * k;
+        float x0 = f->x0, x1 = f->x1, z0 = f->z0, z1 = f->z1;
+        uint32_t c = RGBA(230, 235, 240, (int)(70 + 70 * k));
+        if (z0 == z1) r_gquad(x0, z0 - 0.04f - push, x1, z0 + 0.04f + push, 0.012f, c);
+        else r_gquad(x0 - 0.04f - push, z0, x0 + 0.04f + push, z1, 0.012f, c);
+    }
+    gfx_blend(BL_ALPHA);
+}
+
 static void draw_ground(void)
 {
     rc_draw(SLOT_GROUND, SHX, SHY);
+    if (ISLAND) draw_island_water();
+    for (int i = 0; i < MAX_PT; i++) {                   /* mortar scorch marks, fading */
+        const Part *p = &G->pt[i];
+        if (p->life <= 0 || p->kind != PT_SCORCH) continue;
+        float k = fminf(p->life / (p->max * 0.4f), 1.0f);
+        r_gdisc(p->x, p->z, 0.008f, p->size, 16, col_a(p->c, k), col_a(p->c, 0));
+        r_gdisc(p->x + 0.1f * cosf(p->rot), p->z + 0.1f * sinf(p->rot), 0.009f, p->size * 0.5f, 8, col_a(p->c, k * 0.6f), col_a(p->c, 0));
+    }
 
     /* puddles: dark glossy pools that pick up the lights around them */
     for (int r = 0; r < MH; r++)
@@ -510,6 +705,7 @@ static void draw_wall(int c, int r, const Tile *t)
     uint32_t top = scale_rgb(0xA05C46FF, v), side = scale_rgb(0x844A38FF, v), line = 0x4E2C22FF;
     if (AUTUMN) { top = scale_rgb(0xB4A68CFF, v); side = scale_rgb(0x968A72FF, v); line = 0x6A604EFF; }   /* old stone */
     if (HALLOW) { top = scale_rgb(0x74727CFF, v); side = scale_rgb(0x5C5A66FF, v); line = 0x3A3844FF; }   /* dark mossy stone */
+    if (ISLAND) { top = scale_rgb(0xC2BCAAFF, v); side = scale_rgb(0xA09A88FF, v); line = 0x7E786AFF; }   /* pale weathered limestone */
     r_box(x0, 0, z0, x1, h, z1, top, side, skip);
     r_light_model(x0 + 0.5f, h, z0 + 0.5f);
     /* bricks on the top */
@@ -641,6 +837,15 @@ static void tower_model(int type, int lvl, float x, float h, float z, float ang,
             gfx_blend(BL_ADD);
             float mx = x + ca * (0.08f + bl), mz = z + sa * (0.08f + bl);
             r_glow_cheap(mx, y0 + 0.17f, mz, 0.12f + recoil * 0.2f, RGBA(120, 230, 255, (int)(110 + 140 * recoil)));
+            if (recoil > 0.45f) {                                           /* muzzle flash: a quick four-point star */
+                float sx2, sy2, L = 6.0f + 10.0f * recoil, rot = anim * 9.0f;
+                proj(mx + ca * 0.06f, y0 + 0.17f, mz + sa * 0.06f, &sx2, &sy2);
+                uint32_t fc = RGBA(200, 250, 255, (int)(255 * recoil));
+                for (int k = 0; k < 4; k++) {
+                    float a2 = rot + (float)k * 1.5708f;
+                    gfx_line(sx2, sy2, sx2 + cosf(a2) * L, sy2 + sinf(a2) * L, 2.2f, fc, fc & 0xFFFFFF00);
+                }
+            }
             r_glow_cheap(x, y1 + 0.12f, z, 0.1f, RGBA(120, 220, 255, 160));
             gfx_blend(BL_ALPHA);
         }
@@ -703,7 +908,17 @@ static void tower_model(int type, int lvl, float x, float h, float z, float ang,
         r_unlit = 0;
         if (glow) {
             gfx_blend(BL_ADD);
-            r_glow(x, y1 + 0.12f, z, 0.38f + pulse * 0.5f, RGBA(255, 240, 140, (int)(130 + 120 * pulse)));
+            r_glow(x, y1 + 0.12f, z, 0.38f + pulse * 0.5f + tw_charge * 0.18f, RGBA(255, 240, 140, (int)(130 + 120 * pulse + 60 * tw_charge)));
+            if (tw_charge > 0.7f) {                                         /* charging: sparks jump down to the rings */
+                for (int k = 0; k < 2; k++) {
+                    float a = anim * 23.0f + (float)k * 3.1f, jx = sinf(anim * 57.0f + (float)k) * 0.04f;
+                    float ex = x + cosf(a) * 0.2f, ez = z + sinf(a) * 0.2f, ey = y0 + 0.25f;
+                    float mxx = (x + ex) * 0.5f + jx, myy = (y1 + 0.12f + ey) * 0.5f, mzz = (z + ez) * 0.5f - jx;
+                    uint32_t ac = RGBA(255, 250, 200, (int)(255 * (tw_charge - 0.7f) / 0.3f));
+                    r_line(x, y1 + 0.12f, z, mxx, myy, mzz, 1.4f, ac, ac);
+                    r_line(mxx, myy, mzz, ex, ey, ez, 1.4f, ac, ac & 0xFFFFFF00);
+                }
+            }
             /* idle crackle */
             float ph = fmodf(anim * 3.7f, 1.0f);
             if (ph < 0.25f) {
@@ -732,7 +947,10 @@ static void draw_tower_at(int c, int r)
     r_scale(x + wob, tl->h, z, TOWER_K);
     r_light_model(x, tl->h + 0.5f, z);
     if (t->hurt_t > 0.2f) r_unlit = 1;                                                /* white-hot flash as the blow lands */
+    if (t->stun_t > 0 && fmodf(T * 12.0f, 1.0f) < 0.3f) r_unlit = 1;                  /* jammed: flickers */
+    tw_charge = t->type == TW_TESLA && t->target >= 0 ? clampf(1.0f - t->cd * TOWERS[t->type].rate[t->lvl], 0, 1) : 0.0f;
     tower_model(t->type, t->lvl, x + wob, tl->h, z, t->ang, t->anim, t->recoil, t->pulse, t->built, 1);
+    tw_charge = 0;
     r_unlit = 0;
     r_light_off();
     r_scale_off();
@@ -765,6 +983,25 @@ static void draw_enemy(const Enemy *e)
     r_light_model(e->x, e->y + 0.4f, e->z);
     draw_enemy_model(e);
     r_light_off();
+    if (e->slow_t > 0 && !e->fly) {
+        /* frosted over: little ice glints circling the feet */
+        gfx_blend(BL_ADD);
+        float sz = ENEMIES[e->type].size;
+        for (int k = 0; k < 3; k++) {
+            float a = T * 2.5f + (float)k * 2.09f + e->x;
+            r_glow_cheap(e->x + cosf(a) * sz, 0.05f + 0.15f * fabsf(sinf(T * 3.0f + (float)k)), e->z + sinf(a) * sz, 0.05f, RGBA(200, 245, 255, 200));
+        }
+        r_gdisc(e->x, e->z, 0.01f, sz * 1.1f, 16, RGBA(170, 230, 255, 50), 0xA0E0FF00);
+        gfx_blend(BL_ALPHA);
+    }
+    if (e->shield_t > 0 || e->heal_fx > 0) {
+        /* inside a brass moth's shield: a shimmering bubble; just repaired: a green flash */
+        gfx_blend(BL_ADD);
+        float sz = ENEMIES[e->type].size;
+        if (e->shield_t > 0) r_glow(e->x, e->y + sz * 0.9f, e->z, sz * 1.6f, RGBA(110, 190, 255, (int)(55 + 25 * sinf(T * 8.0f + e->x))));
+        if (e->heal_fx > 0) r_glow(e->x, e->y + sz * 0.9f, e->z, sz * 1.8f, RGBA(100, 255, 130, (int)(200 * e->heal_fx)));
+        gfx_blend(BL_ALPHA);
+    }
     r_scale_off();
 }
 
@@ -1098,6 +1335,133 @@ static void draw_enemy_model(const Enemy *e)
         gfx_blend(BL_ALPHA);
         break;
     }
+    case EN_AUTOMATON: {
+        /* a brass clockwork soldier with one glowing eye and a wind-up key turning in its back */
+        float step = sinf(e->anim * 1.8f), px = -sa, pz = ca;
+        uint32_t brass = en_tint(e, 0xC89A50FF), dark = scale_rgb(brass, 0.72f);
+        if (e->armor_t > 0) brass = col_mix(brass, 0xFFF4D0FF, 0.5f);
+        for (int s2 = -1; s2 <= 1; s2 += 2) {
+            float f = step * 0.07f * (float)s2;
+            r_prism(x + ca * f + px * 0.08f * (float)s2, 0, z + sa * f + pz * 0.08f * (float)s2, 0.04f, 0.04f, 0.2f, 4, a, 0x5A5048FF, 0x4A4038FF);
+        }
+        r_prism(x, 0.18f, z, 0.13f, 0.15f, 0.44f, 8, a, brass, dark);
+        r_prism(x, 0.44f, z, 0.1f, 0.03f, 0.58f, 8, a, col_mix(brass, 0xFFFFFFFF, 0.15f), brass);
+        for (int s2 = -1; s2 <= 1; s2 += 2)
+            r_beam(x + px * 0.16f * (float)s2, 0.38f, z + pz * 0.16f * (float)s2, ca * step * 0.3f * (float)s2, -1.0f, sa * step * 0.3f * (float)s2, 0.18f, 0.04f, 0.04f, dark);
+        /* wind-up key */
+        float kx = x - ca * 0.17f, kz = z - sa * 0.17f, ka = T * 4.0f;
+        r_beam(kx, 0.36f, kz, -ca, 0, -sa, 0.06f, 0.02f, 0.02f, 0x8A7040FF);
+        r_obox(kx - ca * 0.07f, 0.31f + 0.0f * ka, kz - sa * 0.07f, 0.015f, 0.07f * fabsf(cosf(ka)) + 0.01f, 0.41f, a, 0xD8B060FF, 0xB89040FF);
+        gfx_blend(BL_ADD);
+        r_glow_cheap(x + ca * 0.1f, 0.5f, z + sa * 0.1f, 0.08f, 0x60F0FFFF);
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_SPRINGER: {
+        /* a squat copper frog on coiled springs: they squash as it crouches, stretch as it leaps */
+        float y0 = e->y, crouch = e->dash_t < 0 ? clampf(1.0f + e->dash_t * 2.0f, 0, 1) : 0.0f;
+        float coil = 0.16f * (1.0f - 0.55f * crouch) + (e->dash_t > 0 ? 0.06f : 0.0f);
+        uint32_t body = en_tint(e, 0x6AA0A0FF);
+        for (int s2 = -1; s2 <= 1; s2 += 2) {
+            float lx = x - sa * 0.11f * (float)s2 - ca * 0.05f, lz = z + ca * 0.11f * (float)s2 - sa * 0.05f;
+            for (int k = 0; k < 4; k++) {
+                float yy = y0 + coil * (float)k / 4.0f;
+                r_prism(lx, yy, lz, 0.05f, 0.05f, yy + 0.02f, 6, 0, 0xB8A070FF, 0x988050FF);
+            }
+        }
+        float by = y0 + coil;
+        r_crystal(x, by + 0.08f, z, 0.17f, 0.12f, 0.07f, 7, a, body);
+        r_crystal(x + ca * 0.13f, by + 0.13f, z + sa * 0.13f, 0.08f, 0.06f, 0.04f, 6, a, col_mix(body, 0xFFFFFFFF, 0.15f));
+        gfx_blend(BL_ADD);
+        eyes(x, by + 0.17f, z, a, 0.15f, 0.05f, 0.035f, 0xFFE070FF);
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_MOTH: {
+        /* a brass moth with glassy wings; its shield bubble covers whatever walks under it */
+        float y = e->y;
+        r_gdisc(x, z, 0.006f, 0.26f, 16, 0x00000040, 0x00000000);
+        uint32_t body = en_tint(e, 0xD8B060FF);
+        r_crystal(x, y, z, 0.07f, 0.06f, 0.06f, 6, a, body);
+        r_beam(x - ca * 0.12f, y, z - sa * 0.12f, ca, 0.05f, sa, 0.24f, 0.07f, 0.07f, scale_rgb(body, 0.8f));
+        float flap = sinf(e->anim * 4.5f) * 0.7f;
+        gfx_blend(BL_ADD);
+        for (int s2 = -1; s2 <= 1; s2 += 2) {
+            float px = -sa * (float)s2, pz = ca * (float)s2;
+            for (int w = 0; w < 2; w++) {
+                float off = w ? -0.08f : 0.05f, L = w ? 0.22f : 0.3f;
+                float tx = x + px * L * cosf(flap) + ca * off, ty = y + L * sinf(flap) * 0.6f, tz = z + pz * L * cosf(flap) + sa * off;
+                float s0x, s0y, s1x, s1y, s2x, s2y;
+                proj(x + ca * (off + 0.06f), y, z + sa * (off + 0.06f), &s0x, &s0y);
+                proj(x + ca * (off - 0.06f), y, z + sa * (off - 0.06f), &s1x, &s1y);
+                proj(tx, ty, tz, &s2x, &s2y);
+                gfx_tri(s0x, s0y, 0xA0E0FF70, s1x, s1y, 0xA0E0FF70, s2x, s2y, 0xFFE8B040);
+            }
+        }
+        r_glow(x, y, z, 0.35f, 0x80D0FF50);
+        r_gring(x, z, 0.02f, 1.7f, 0.02f, 32, RGBA(120, 200, 255, (int)(16 + 8 * sinf(T * 3.0f))));
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_TINKER: {
+        /* a little hooded repair-bot with a spanner and a glowing green antenna */
+        float step = sinf(e->anim * 2.0f), px = -sa, pz = ca;
+        uint32_t robe = en_tint(e, 0x8A6A9AFF);
+        r_prism(x, 0, z, 0.15f, 0.08f, 0.36f, 7, a, robe, scale_rgb(robe, 0.78f));
+        r_obox(x - ca * 0.1f, 0.15f, z - sa * 0.1f, 0.06f, 0.09f, 0.32f, a, 0x7A6A50FF, 0x5A4A38FF);   /* tool pack */
+        r_crystal(x + ca * 0.02f, 0.42f, z + sa * 0.02f, 0.08f, 0.07f, 0.05f, 6, a, 0xB8B0A0FF);
+        float sw = sinf(T * 6.0f) * 0.5f;
+        r_beam(x + px * 0.13f, 0.28f, z + pz * 0.13f, ca, 0.4f + sw, sa, 0.18f, 0.03f, 0.03f, 0x9A9AA0FF);    /* spanner */
+        r_beam(x, 0.48f, z, 0, 1, 0, 0.12f, 0.015f, 0.015f, 0x606060FF);
+        gfx_blend(BL_ADD);
+        float pulse = clampf(1.0f - e->heal_t / 2.4f, 0, 1);
+        r_glow_cheap(x, 0.62f, z, 0.07f + 0.08f * pulse, RGBA(110, 255, 140, (int)(140 + 100 * pulse)));
+        eyes(x, 0.43f, z, a, 0.07f, 0.03f, 0.025f, 0x90FFB0FF);
+        gfx_blend(BL_ALPHA);
+        (void)step;
+        break;
+    }
+    case EN_SENTINEL: case EN_ARCHITECT: {
+        /* stone-and-brass guardians; the Architect is a towering titan with a turning gear in its chest */
+        int boss = e->type == EN_ARCHITECT;
+        float k = boss ? 1.75f : 1.0f;
+        float step = sinf(e->anim * 1.2f), px = -sa, pz = ca;
+        float raise = e->act_t > 0 ? (e->act_t > 0.22f ? (0.6f - e->act_t) / 0.38f : e->act_t / 0.22f) : 0.0f;
+        uint32_t stone = en_tint(e, boss ? 0xB08848FF : 0x8A9088FF), dark = scale_rgb(stone, 0.75f);
+        if (e->armor_t > 0) stone = col_mix(stone, 0xE8F0FFFF, 0.5f);
+        for (int s2 = -1; s2 <= 1; s2 += 2) {
+            float f = step * 0.12f * (float)s2 * k;
+            r_obox(x + ca * f + px * 0.17f * k * (float)s2, 0, z + sa * f + pz * 0.17f * k * (float)s2, 0.1f * k, 0.1f * k, 0.25f * k, a, 0x50504AFF, 0x40403AFF);
+        }
+        r_obox(x, 0.23f * k, z, 0.26f * k, 0.2f * k, 0.62f * k, a, stone, dark);
+        r_obox(x, 0.4f * k, z, 0.27f * k, 0.21f * k, 0.46f * k, a, 0xC09448FF, 0xA07830FF);          /* brass band */
+        r_obox(x + ca * 0.03f * k, 0.62f * k, z + sa * 0.03f * k, 0.13f * k, 0.12f * k, 0.8f * k, a, stone, dark);
+        for (int s2 = -1; s2 <= 1; s2 += 2) {
+            float ax = x + px * 0.32f * k * (float)s2, az = z + pz * 0.32f * k * (float)s2;
+            r_beam(ax, 0.55f * k, az, ca, -0.6f + raise * 2.6f, sa, 0.32f * k, 0.12f * k, 0.12f * k, stone);
+        }
+        if (boss) {                                                      /* a big gear turning in its chest */
+            float gx = x + ca * 0.27f * k, gz = z + sa * 0.27f * k, gy = 0.44f * k;
+            float sx[25], sy[25], cxs, cys;
+            proj(gx, gy, gz, &cxs, &cys);
+            for (int i = 0; i <= 24; i++) {
+                float an = T * 1.5f + (float)i / 24.0f * 6.2832f, rr = (i & 1) ? 0.13f * k : 0.17f * k;
+                proj(gx - sa * cosf(an) * rr, gy + sinf(an) * rr, gz + ca * cosf(an) * rr, &sx[i], &sy[i]);
+            }
+            uint32_t gc = lt_shade(0xE0B050FF, gx, gy, gz, 1.0f);
+            if (sa > -0.3f) for (int i = 0; i < 24; i++) gfx_tri(cxs, cys, gc, sx[i], sy[i], gc, sx[i + 1], sy[i + 1], gc);
+            for (int i = 0; i < 4; i++) {                                 /* little brass spires on its crown */
+                float an = a + (float)i * 1.5708f + 0.785f;
+                r_prism(x + cosf(an) * 0.1f * k, 0.8f * k, z + sinf(an) * 0.1f * k, 0.03f * k, 0.0f, 0.95f * k, 4, an, 0xE8C060FF, 0xC09838FF);
+            }
+        }
+        gfx_blend(BL_ADD);
+        float charge = boss ? clampf(1.0f - e->pulse_t / 2.0f, 0, 1) : 0.0f;   /* glows hotter just before its shockwave */
+        eyes(x + ca * 0.03f * k, 0.73f * k, z + sa * 0.03f * k, a, 0.13f * k, 0.05f * k, 0.04f * k, boss ? 0x90E0FFFF : 0x70C8FFFF);
+        if (boss) r_glow(x + ca * 0.28f * k, 0.44f * k, z + sa * 0.28f * k, 0.4f + 0.6f * charge, RGBA(120, 210, 255, (int)(70 + 150 * charge)));
+        gfx_blend(BL_ALPHA);
+        break;
+    }
     case EN_PUMPKIN: case EN_GOURD: {
         int king = e->type == EN_PUMPKIN;
         float k = king ? 1.0f : 0.32f;
@@ -1171,16 +1535,33 @@ static void build_static(void)
     lt_begin();
     lt_build(0, 1);
     rc_begin();
-    nlant = njack = 0;
+    nlant = njack = nprop = 0;
     rc_slot(SLOT_GROUND);
     build_ground();
     if (AUTUMN) build_autumn_ground();
+    if (ISLAND) build_island_ground();
+    if (ISLAND)          /* brass gears on a few wall fronts */
+        for (int r = 0; r < MH; r++) for (int c = 0; c < MW; c++)
+            if (G->tile[r][c].kind == TL_WALL && !solid(c, r + 1) && hf(c, r, 120) < 0.16f && nprop < MAX_PROP) {
+                Prop *p = &prop[nprop++];
+                p->kind = PR_GEAR; p->x = (float)c + 0.3f + 0.4f * hf(c, r, 121); p->z = (float)r + 1.01f; p->y = 0.25f;
+                p->ph = hf(c, r, 122) * 6.28f; p->row = (uint8_t)(r - ROW_MIN);
+            }
     for (int r = ROW_MIN; r < ROW_MAX; r++) {
         rc_slot(SLOT_ROW0 + r - ROW_MIN);
         for (int i = 0; i < MW + 12; i++) {
             int c = col_order[i];
             if (!in_map(c, r)) {
                 if (outside_lane(c, r)) continue;
+                if (ISLAND) {                                  /* open sea: now and then a rocky islet with a pine */
+                    if (hf(c, r, 2) < 0.05f && (c < -1 || c > MW || r < -1 || r > MH)) {
+                        r_light_model((float)c + 0.5f, 0.2f, (float)r + 0.5f);
+                        r_crystal((float)c + 0.5f, 0.05f, (float)r + 0.5f, 0.45f, 0.25f, 0.1f, 6, hf(c, r, 3) * 3.0f, 0x7A7A6EFF);
+                        r_light_off();
+                        draw_tree(c, r);
+                    }
+                    continue;
+                }
                 if (hf(c, r, 2) < 0.72f) draw_tree(c, r);
                 else if (hf(c, r, 2) < 0.85f) draw_bush(c, r);
                 continue;
@@ -1189,6 +1570,7 @@ static void build_static(void)
             switch (t->kind) {
             case TL_TREE: draw_tree(c, r); break;
             case TL_GRAVE:
+                if (ISLAND) { draw_island_prop(c, r, t); break; }
                 draw_grave((float)c + 0.5f + (hf(c, r, 4) - 0.5f) * 0.25f, (float)r + 0.45f, hf(c, r, 5), (hf(c, r, 6) - 0.5f) * 0.4f, hf(c, r, 3) < 0.3f);
                 break;
             case TL_WALL: draw_wall(c, r, t); break;
@@ -1204,6 +1586,69 @@ static void build_static(void)
 /* swinging lanterns and flickering pumpkin faces belonging to this row */
 static void draw_row_props(int row)
 {
+    for (int i = 0; i < nprop; i++) {
+        const Prop *p = &prop[i];
+        if (p->row != row) continue;
+        float x = p->x, z = p->z;
+        if (p->kind == PR_RUNE) {
+            /* runes carved down the front face, glowing in a slow breathing rhythm */
+            float k = 0.55f + 0.45f * sinf(T * 1.3f + p->ph);
+            gfx_blend(BL_ADD);
+            uint32_t rc = RGBA(110, 210, 255, (int)(220 * k));
+            float fz = z + 0.2f;
+            for (int j = 0; j < 5; j++) {
+                float y = 0.25f + 0.2f * (float)j, w = 0.08f;
+                if ((j + (int)(p->ph * 3.0f)) & 1) { r_line(x - w, y, fz, x + w, y + 0.06f, fz, 1.6f, rc, rc); r_line(x + w, y, fz, x - w, y + 0.06f, fz, 1.6f, rc, rc); }
+                else { r_line(x, y - 0.02f, fz, x, y + 0.08f, fz, 1.6f, rc, rc); r_line(x - w, y + 0.03f, fz, x + w, y + 0.03f, fz, 1.6f, rc, rc); }
+            }
+            r_glow(x, 0.7f, fz, 0.7f, RGBA(90, 180, 255, (int)(70 * k)));
+            gfx_blend(BL_ALPHA);
+        } else if (p->kind == PR_ORRERY) {
+            /* three tilted brass rings turning at different speeds, a little sun in the middle */
+            float cy = 0.9f;
+            r_light_model(x, cy, z);
+            r_crystal(x, cy, z, 0.1f, 0.1f, 0.1f, 6, T, 0xF0C060FF);
+            for (int k = 0; k < 3; k++) {
+                float rad = 0.24f + 0.11f * (float)k, spin = T * (0.6f - 0.18f * (float)k) + p->ph + (float)k, tilt = 0.5f + 0.35f * (float)k;
+                float px = 0, py = 0, pz = 0, ox = 0, oy = 0, oz = 0;
+                for (int s2 = 0; s2 <= 16; s2++) {
+                    float a = (float)s2 / 16.0f * 6.2832f;
+                    float lx = cosf(a) * rad, ly = sinf(a) * rad * sinf(tilt), lz = sinf(a) * rad * cosf(tilt);
+                    float rx = lx * cosf(spin) - lz * sinf(spin), rz = lx * sinf(spin) + lz * cosf(spin);
+                    px = x + rx; py = cy + ly; pz = z + rz;
+                    if (s2) r_line(ox, oy, oz, px, py, pz, 2.6f, lt_shade(0xD8A850FF, x, cy, z, 0.9f), lt_shade(0xD8A850FF, x, cy, z, 0.9f));
+                    ox = px; oy = py; oz = pz;
+                }
+                float pa = T * (1.2f - 0.3f * (float)k) + p->ph * (float)(k + 1);      /* a planet riding each ring */
+                float lx = cosf(pa) * rad, ly = sinf(pa) * rad * sinf(tilt), lz = sinf(pa) * rad * cosf(tilt);
+                r_crystal(x + lx * cosf(spin) - lz * sinf(spin), cy + ly, z + lx * sinf(spin) + lz * cosf(spin), 0.05f, 0.05f, 0.05f, 4, T, k == 1 ? 0x60A0E0FF : 0xC0705AFF);
+            }
+            r_light_off();
+            gfx_blend(BL_ADD);
+            r_glow_cheap(x, cy, z, 0.18f, RGBA(255, 210, 120, 140));
+            gfx_blend(BL_ALPHA);
+        } else {
+            /* a brass gear turning on the face of a wall, its neighbour meshing the other way */
+            for (int g2 = 0; g2 < 2; g2++) {
+                float gx = x + (g2 ? 0.17f : 0.0f), gy = p->y + (g2 ? 0.1f : 0.0f), rad = g2 ? 0.07f : 0.1f;
+                float rot = (g2 ? -1.43f : 1.0f) * T * 0.8f + p->ph;
+                int teeth = g2 ? 7 : 10;
+                float sx[34], sy[34];
+                int n = teeth * 2;
+                for (int k = 0; k <= n; k++) {
+                    float a = rot + (float)k / (float)n * 6.2832f, rr = (k & 1) ? rad * 0.78f : rad;
+                    proj(gx + cosf(a) * rr, gy + sinf(a) * rr, z, &sx[k], &sy[k]);
+                }
+                float cxs, cys;
+                proj(gx, gy, z, &cxs, &cys);
+                uint32_t col = lt_shade(g2 ? 0xA8803CFF : 0xC09448FF, gx, gy, z, 0.8f);
+                for (int k = 0; k < n; k++) gfx_tri(cxs, cys, col, sx[k], sy[k], col, sx[k + 1], sy[k + 1], col);
+                float hx, hy;
+                proj(gx, gy, z + 0.005f, &hx, &hy);
+                gfx_poly(hx, hy, rad * 0.25f * proj_scale(gy, z), 6, rot, lt_shade(0x5A4020FF, gx, gy, z, 1.0f));
+            }
+        }
+    }
     for (int i = 0; i < njack; i++) {
         const Jack *j = &jack[i];
         if (j->row != row) continue;
@@ -1251,7 +1696,7 @@ static void draw_world(void)
     int ghost = G->state == ST_PLAY && can_build(G, G->cx, G->cz);
     for (int r = ROW_MIN; r < ROW_MAX; r++) {
         rc_draw(SLOT_ROW0 + r - ROW_MIN, SHX, SHY);
-        if (HALLOW) draw_row_props(r - ROW_MIN);
+        if (HALLOW || ISLAND) draw_row_props(r - ROW_MIN);
         if (r >= 0 && r < MH)
             for (int i = 0; i < MW + 12; i++) {
                 int c = col_order[i];
@@ -1312,6 +1757,14 @@ static void draw_effects(void)
         if (s->alive && s->kind == SH_SHELL) {
             r_gdisc(s->x, s->z, 0.01f, 0.18f, 16, 0x00000050, 0x00000000);
             r_prism(s->x, s->y - 0.09f, s->z, 0.08f, 0.08f, s->y + 0.09f, 6, T * 5.0f, 0x303038FF, 0x202028FF);
+            /* where it will land: a red ring closing in */
+            float u = s->t / s->dur, rr = s->splash * (1.3f - 0.6f * u);
+            gfx_blend(BL_ADD);
+            uint32_t mc = RGBA(255, 70, 40, (int)(60 + 120 * u * (0.6f + 0.4f * sinf(T * 30.0f))));
+            r_gring(s->ex, s->ez, 0.02f, rr, 0.04f, 14, mc);
+            r_line(s->ex - rr * 0.4f, 0.02f, s->ez, s->ex + rr * 0.4f, 0.02f, s->ez, 1.5f, mc, mc);
+            r_line(s->ex, 0.02f, s->ez - rr * 0.4f, s->ex, 0.02f, s->ez + rr * 0.4f, 1.5f, mc, mc);
+            gfx_blend(BL_ALPHA);
         }
     }
 
@@ -1329,7 +1782,7 @@ static void draw_effects(void)
             break;
         case PT_RING: {
             float u = 1.0f - k, rr = lerpf(p->size, p->vx, 1.0f - (1.0f - u) * (1.0f - u));
-            r_gring(p->x, p->z, p->y, rr, 0.06f + 0.06f * k, 32, col_a(p->c, k));
+            r_gring(p->x, p->z, p->y, rr, 0.06f + 0.06f * k, rr > 1.2f ? 28 : 18, col_a(p->c, k));
             break;
         }
         case PT_SPLASH: {
@@ -1337,6 +1790,18 @@ static void draw_effects(void)
             r_gring(p->x, p->z, p->y, p->size * (0.3f + u), 0.025f, 10, col_a(p->c, k));
             break;
         }
+        case PT_FIRE: {
+            uint32_t c = col_mix(0xFFE8A0FF, col_mix(0xFF7020FF, 0x602010FF, fmaxf(0, 0.6f - k) / 0.6f), 1.0f - k);
+            r_glow_cheap(p->x, p->y, p->z, p->size, col_a(c, k * 0.9f));
+            break;
+        }
+        case PT_SHARD:
+            r_unlit = 1;
+            r_alpha = k;
+            r_crystal(p->x, p->y, p->z, p->size * 0.4f, p->size, p->size, 4, p->rot, p->c);
+            r_alpha = 1.0f;
+            r_unlit = 0;
+            break;
         case PT_GLOW:
             r_glow(p->x, p->y, p->z, p->size * (1.4f - k * 0.4f), col_a(p->c, k));
             break;
@@ -1389,7 +1854,7 @@ static void draw_leaves(void)
 
 static void draw_rain(void)
 {
-    if (HALLOW) return;
+    if (HALLOW || ISLAND) return;
     if (AUTUMN) { draw_leaves(); return; }
     float f = G->flash;
     uint32_t c = RGBA(170, 190, 235, (int)(60 + 110 * clampf(f, 0, 1)));
@@ -1507,8 +1972,65 @@ static void draw_hallow_night(void)
     gfx_quad4(VW - 90, 0, 0x0A061200, VW, 0, 0x0A0612A0, VW, VH, 0x0A0612A0, VW - 90, VH, 0x0A061200);
 }
 
+/* sunrise over the island: the sun climbing out of the top of the frame, rays fanning down through
+ * the haze, mist on the water that burns off as the morning comes, gulls */
+static void draw_island_dawn(void)
+{
+    float s = G->sun, sx, sy;
+    sun_pos(&sx, &sy);
+    /* sea mist, thick at first light */
+    float mist = 1.0f - s * 0.85f;
+    for (int i = 0; i < 10; i++) {
+        float x = fmodf((float)i * 3.1f + T * 0.16f, 29.0f) - 5.0f;
+        float z = (i & 1) ? -2.5f + (float)(i % 3) * 0.6f : (float)MH + 0.5f + (float)(i % 3) * 0.5f;
+        if (i % 4 == 3) z = 3.0f + (float)i;
+        r_glow(x, 0.3f, z, 3.2f, RGBA(255, 220, 210, (int)(55 * mist)));
+    }
+    /* distant haze, coloured by the hour */
+    uint32_t hz = sun_col((int)(150 - 70 * s));
+    gfx_rect_v(0, 0, VW, 200, hz, hz & 0xFFFFFF00);
+    gfx_blend(BL_ADD);
+    /* rays fanning out from the sun, longest and richest at dawn */
+    for (int i = 0; i < 11; i++) {
+        float base = -1.15f + (float)i * 0.23f + sinf(T * 0.07f + (float)i * 1.9f) * 0.04f + (s - 0.5f) * 0.15f;
+        float w = 0.035f + 0.025f * (float)((i * 37) % 3);
+        float a = (26.0f + 14.0f * sinf(T * 0.4f + (float)i * 2.1f)) * (1.0f - 0.45f * s);
+        float L = VH * 1.5f;
+        float a0 = base - w, a1 = base + w;
+        uint32_t c0 = sun_col((int)a), c1 = sun_col(0);
+        gfx_tri(sx, sy, c0, sx + sinf(a0) * L, sy + cosf(a0) * L, c1, sx + sinf(a1) * L, sy + cosf(a1) * L, c1);
+    }
+    /* the sun itself */
+    gfx_glow(sx, sy, 420, sun_col(70));
+    gfx_glow(sx, sy, 150, sun_col(110));
+    gfx_blend(BL_ALPHA);
+    if (sy > -30) {
+        gfx_poly(sx, sy, 26, 24, 0, sun_col(255));
+        gfx_blend(BL_ADD);
+        gfx_poly(sx, sy, 18, 20, 0, sun_col((int)(60 + 120 * s)));
+        gfx_blend(BL_ALPHA);
+    }
+    /* gulls wheeling over the island */
+    for (int i = 0; i < 5; i++) {
+        float t = T * (0.05f + 0.012f * (float)i) + (float)i * 0.37f;
+        float gx = -4.0f + fmodf(t, 1.0f) * 27.0f, gz = 1.0f + (float)i * 2.2f + sinf(T * 0.3f + (float)i) * 0.8f, gy = 2.6f + 0.3f * (float)(i % 2);
+        float px, py;
+        proj(gx, gy, gz, &px, &py);
+        float flap = sinf(T * (5.0f + (float)i) + (float)i) * 5.0f, wsz = 9.0f;
+        uint32_t c = RGBA(250, 248, 240, 230);
+        gfx_line(px - wsz, py - flap, px, py, 2.0f, c, c);
+        gfx_line(px, py, px + wsz, py - flap, 2.0f, c, c);
+        gfx_line(px - wsz * 0.5f, py + 30.0f, px + wsz * 0.5f, py + 30.0f, 3.0f, 0x00000018, 0x00000018);   /* faint shadow below */
+    }
+    /* soft vignette */
+    gfx_rect_v(0, VH - 80, VW, 80, 0x10141C00, 0x10141C80);
+    gfx_quad4(0, 0, 0x10141C60, 80, 0, 0x10141C00, 80, VH, 0x10141C00, 0, VH, 0x10141C60);
+    gfx_quad4(VW - 80, 0, 0x10141C00, VW, 0, 0x10141C60, VW, VH, 0x10141C60, VW - 80, VH, 0x10141C00);
+}
+
 static void draw_mist_vignette(void)
 {
+    if (ISLAND) { draw_island_dawn(); return; }
     if (HALLOW) { draw_hallow_night(); return; }
     if (AUTUMN) { draw_golden_hour(); return; }
     /* slow drifting ground mist */
@@ -1672,10 +2194,11 @@ static void draw_hud(void)
     if (G->boss >= 0 && G->en[G->boss].alive) {
         const Enemy *b = &G->en[G->boss];
         float f = clampf(b->hp / b->maxhp, 0, 1);
-        gfx_text_sc(ENEMIES[b->type].name, VW * 0.5f, 84, 1.6f, b->type == EN_PUMPKIN ? 0xFFC060FF : (b->type == EN_GHOULKING ? 0xA0FF90FF : 0xA0E8FFFF));
+        gfx_text_sc(ENEMIES[b->type].name, VW * 0.5f, 84, 1.6f, b->type == EN_PUMPKIN ? 0xFFC060FF : (b->type == EN_GHOULKING ? 0xA0FF90FF : (b->type == EN_ARCHITECT ? 0xF0D080FF : 0xA0E8FFFF)));
         gfx_rect(VW * 0.5f - 151, 98, 302, 10, 0x000000C0);
         if (b->type == EN_PUMPKIN) gfx_rect_v(VW * 0.5f - 150, 99, 300 * f, 8, 0xFFC060FF, 0xE06010FF);
         else if (b->type == EN_GHOULKING) gfx_rect_v(VW * 0.5f - 150, 99, 300 * f, 8, 0xA0FF80FF, 0x30A040FF);
+        else if (b->type == EN_ARCHITECT) gfx_rect_v(VW * 0.5f - 150, 99, 300 * f, 8, 0xFFE090FF, 0xB07820FF);
         else gfx_rect_v(VW * 0.5f - 150, 99, 300 * f, 8, 0x80E0FFFF, 0x3080D0FF);
     }
 
@@ -1786,16 +2309,16 @@ static void fire_text(const char *s, float cx, float y, float px)
 
 static void draw_title(void)
 {
-    gfx_rect(0, 0, VW, VH, AUTUMN ? 0x1A0C0060 : (HALLOW ? 0x0A061870 : 0x02040A70));
+    gfx_rect(0, 0, VW, VH, AUTUMN ? 0x1A0C0060 : (HALLOW ? 0x0A061870 : (ISLAND ? 0x0A142060 : 0x02040A70)));
     fire_text("STORMFIRE", VW * 0.5f, 104, 10.0f);
-    gfx_text_sc(HALLOW ? "THE DEAD WALK TONIGHT. KEEP THE FIRE LIT." : (AUTUMN ? "HOLD THE FIRE TILL THE SUN GOES DOWN" : "KEEP THE CAMPFIRE BURNING THROUGH THE STORM"),
-                VW * 0.5f, 190, 1.8f, HALLOW ? 0xD8C8FFFF : (AUTUMN ? 0xFFE8C8FF : 0xC8D4F0FF));
+    gfx_text_sc(ISLAND ? "AN ISLAND OF OLD MACHINES. HOLD IT TILL SUNRISE." : HALLOW ? "THE DEAD WALK TONIGHT. KEEP THE FIRE LIT." : (AUTUMN ? "HOLD THE FIRE TILL THE SUN GOES DOWN" : "KEEP THE CAMPFIRE BURNING THROUGH THE STORM"),
+                VW * 0.5f, 190, 1.8f, ISLAND ? 0xFFE0C8FF : HALLOW ? 0xD8C8FFFF : (AUTUMN ? 0xFFE8C8FF : 0xC8D4F0FF));
     /* level picker */
     char lb[48];
     snprintf(lb, sizeof lb, "LEVEL %d: %s", G->level + 1, G->lv->name);
     float lw = gfx_text_width(lb, 2.4f), nudge = sinf(T * 5.0f) * 3.0f;
     panel(VW * 0.5f - lw * 0.5f - 52, 216, lw + 104, 36, 0x0A0E18C8);
-    gfx_text_sc(lb, VW * 0.5f, 226, 2.4f, HALLOW ? 0xC890FFFF : (AUTUMN ? 0xFFC060FF : 0x90D8FFFF));
+    gfx_text_sc(lb, VW * 0.5f, 226, 2.4f, ISLAND ? 0x90E8E0FF : HALLOW ? 0xC890FFFF : (AUTUMN ? 0xFFC060FF : 0x90D8FFFF));
     gfx_text_s("<", VW * 0.5f - lw * 0.5f - 38 - nudge, 226, 2.4f, 0xFFFFFFC0);
     gfx_text_s(">", VW * 0.5f + lw * 0.5f + 24 + nudge, 226, 2.4f, 0xFFFFFFC0);
     if (fmodf(T, 1.2f) < 0.85f) gfx_text_sc("PRESS A TO START", VW * 0.5f, 272, 2.6f, 0xFFFFFFFF);
@@ -1869,11 +2392,27 @@ void game_render(const Game *g)
     T = g->time;
     gfx_begin();
     if (built_level != g->level) build_static();
-    float sh = g->shake * sqrtf(g->shake) * 9.0f;                 /* screen shake in pixels */
-    SHX = (sinf(T * 53.0f) * 0.7f + sinf(T * 31.0f + 1.3f) * 0.3f) * sh;
-    SHY = (cosf(T * 41.0f) * 0.7f + sinf(T * 67.0f + 0.4f) * 0.3f) * sh * 0.75f;
-    cam_world(SHX, SHY);
-    if (HALLOW) {
+    /* screen shake with depth parallax (the near side of the board moves more than the far side),
+     * a tiny zoom punch on big hits, and a slice glitch when mortar shells land */
+    float sh = g->shake * sqrtf(g->shake) * 10.0f;
+    float shx = (sinf(T * 53.0f) * 0.7f + sinf(T * 31.0f + 1.3f) * 0.3f) * sh;
+    float shy = (cosf(T * 41.0f) * 0.7f + sinf(T * 67.0f + 0.4f) * 0.3f) * sh * 0.75f;
+    SHX = SHY = 0;                       /* the offset now goes through the view transform instead */
+    cam_world(0, 0);
+    gfx_view(shx, shy, 1.0f + g->punch * 0.014f);
+    gfx_fx(1, g->glitch > 0 ? 7.0f * fminf(g->glitch / 0.06f, 1.0f) : 0.0f, (uint32_t)(T * 30.0f) * 977u);
+    if (ISLAND) {
+        /* sunrise: rosy and dim at first light, golden, then a bright clear morning */
+        float s = G->sun, B[3], U[3];
+        static const float K[3][3] = { {0.48f, 0.33f, 0.42f}, {0.76f, 0.59f, 0.46f}, {0.84f, 0.80f, 0.72f} };
+        float u = s * 2.0f;
+        int k0 = u >= 1.0f ? 1 : 0;
+        float f = u - (float)k0;
+        if (f > 1) f = 1;
+        for (int i = 0; i < 3; i++) { B[i] = K[k0][i] + (K[k0 + 1][i] - K[k0][i]) * f; U[i] = B[i] * 0.1f; }
+        lt_set_ambient(B, U, 0.22f);
+        rc_set_stretch(2.6f - 2.0f * s);                         /* long dawn shadows shorten as it climbs */
+    } else if (HALLOW) {
         /* dusk: cool moonlight with a little purple, branches casting a patchy shade */
         static const float B[3] = { 0.30f, 0.29f, 0.44f }, U[3] = { 0.05f, 0.05f, 0.08f };
         lt_set_ambient(B, U, 0.18f);
@@ -1888,7 +2427,8 @@ void game_render(const Game *g)
     rc_relight(T, G->lv->env == ENV_STORM ? 0.6f + 0.6f * G->wind : 0.6f + 0.8f * G->wind);
 
     /* sky glow behind everything (only visible at the very top) */
-    if (HALLOW) gfx_rect_v(0, 0, VW, VH, 0x2A2040FF, 0x100C18FF);
+    if (ISLAND) gfx_rect_v(0, 0, VW, VH, 0x2C5070FF, 0x1C3850FF);
+    else if (HALLOW) gfx_rect_v(0, 0, VW, VH, 0x2A2040FF, 0x100C18FF);
     else if (AUTUMN) gfx_rect_v(0, 0, VW, VH, 0x5A3A20FF, 0x2A1A10FF);
     else gfx_rect_v(0, 0, VW, VH, 0x0A1220FF, 0x05080EFF);
 
@@ -1900,6 +2440,21 @@ void game_render(const Game *g)
     draw_mist_vignette();
     draw_world_ui();      dbg_nv[4] = gfx_nv;
 
+    if (g->glitch > 0) {
+        /* a few bright slices to sell the glitch */
+        gfx_fx(0, 0, 0);
+        gfx_blend(BL_ADD);
+        uint32_t seed = (uint32_t)(T * 30.0f) * 2654435761u;
+        for (int i = 0; i < 4; i++) {
+            seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5;
+            float y = (float)(seed % 480), h = 2.0f + (float)((seed >> 9) % 5);
+            gfx_rect(0, y, VW, h, (i & 1) ? RGBA(255, 60, 120, 40) : RGBA(60, 220, 255, 40));
+        }
+        gfx_blend(BL_ALPHA);
+    }
+    /* the HUD drifts a little against the shake (parallax), and never glitches */
+    gfx_view(-shx * 0.12f, -shy * 0.12f, 1.0f);
+    gfx_fx(0, 0, 0);
     switch (g->state) {
     case ST_TITLE: draw_title(); break;
     case ST_PLAY: draw_hud(); break;

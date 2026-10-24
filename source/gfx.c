@@ -16,7 +16,27 @@ GSeg gfx_seg[GFX_MAX_SEG];
 int  gfx_nv, gfx_nseg;
 
 static int   cur_mode;
-static float v_ox, v_oy, v_zoom = 1.0f;
+typedef struct { float ox, oy, zoom; int par; float glitch; uint32_t seed; float ax, ay, bx, cx, by, cy; int ident; } GfxView;
+static GfxView gfx_vt = { 0, 0, 1.0f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };   /* file-private, so the compiler keeps it in registers */
+
+static inline void gfx_xform_inl(float *px, float *py)
+{
+    float x = *px, y = *py;
+    float nx = x * gfx_vt.zoom + gfx_vt.ax + gfx_vt.bx + gfx_vt.cx * y;
+    float ny = y * gfx_vt.zoom + gfx_vt.ay + gfx_vt.by + gfx_vt.cy * y;
+    if (gfx_vt.glitch > 0) {                      /* slice glitch: some horizontal bands slide sideways */
+        uint32_t h = ((uint32_t)(int)(ny * (1.0f / 13.0f)) + 7u) * 2654435761u ^ gfx_vt.seed;
+        h ^= h >> 15;
+        if ((h & 3) == 0) nx += ((h & 16) ? 1.0f : -1.0f) * gfx_vt.glitch * (0.4f + (float)((h >> 5) & 7) * 0.09f);
+    }
+    *px = nx; *py = ny;
+}
+#define v_ox gfx_vt.ox
+#define v_oy gfx_vt.oy
+#define v_zoom gfx_vt.zoom
+#define v_par gfx_vt.par
+#define v_glitch gfx_vt.glitch
+#define v_seed gfx_vt.seed
 
 uint32_t col_mix(uint32_t a, uint32_t b, float t)
 {
@@ -74,14 +94,40 @@ void gfx_blend(int mode)
     cur_mode = mode;
 }
 
-void gfx_view(float ox, float oy, float zoom) { v_ox = ox; v_oy = oy; v_zoom = zoom; }
-void gfx_view_reset(void) { v_ox = 0; v_oy = 0; v_zoom = 1.0f; }
+/* precompute the per-frame constants so the per-vertex transform is a couple of multiply-adds:
+ *   x' = x*zoom + ax + (bx + cx*y),  y' = y*zoom + ay + (by + cy*y)   (b + c*y is the parallax offset) */
+static void vt_update(void)
+{
+    gfx_vt.ax = VW * 0.5f * (1.0f - v_zoom);
+    gfx_vt.ay = VH * 0.5f * (1.0f - v_zoom);
+    if (v_par) { gfx_vt.bx = v_ox * 0.55f; gfx_vt.cx = v_ox * 0.9f / VH; gfx_vt.by = v_oy * 0.55f; gfx_vt.cy = v_oy * 0.9f / VH; }
+    else { gfx_vt.bx = v_ox; gfx_vt.cx = 0; gfx_vt.by = v_oy; gfx_vt.cy = 0; }
+    /* nothing moving the view (the usual case): vertices pass straight through */
+    gfx_vt.ident = v_zoom == 1.0f && fabsf(v_ox) < 0.05f && fabsf(v_oy) < 0.05f && v_glitch <= 0;
+}
+void gfx_view(float ox, float oy, float zoom) { v_ox = ox; v_oy = oy; v_zoom = zoom; vt_update(); }
+void gfx_view_reset(void) { v_ox = 0; v_oy = 0; v_zoom = 1.0f; v_par = 0; v_glitch = 0; vt_update(); }
+void gfx_fx(int parallax, float glitch, uint32_t seed) { v_par = parallax; v_glitch = glitch; v_seed = seed; vt_update(); }
+
+void gfx_xform(float *px, float *py) { gfx_xform_inl(px, py); }
+
+void gfx_xform_n(GVtx *v, int n)
+{
+    if (gfx_vt.ident) return;
+    const float z = gfx_vt.zoom, ax = gfx_vt.ax + gfx_vt.bx, ay = gfx_vt.ay + gfx_vt.by, cx = gfx_vt.cx, cy = gfx_vt.cy;
+    if (gfx_vt.glitch > 0) { for (int i = 0; i < n; i++) gfx_xform_inl(&v[i].x, &v[i].y); return; }
+    for (int i = 0; i < n; i++) {
+        float y = v[i].y;
+        v[i].x = v[i].x * z + ax + cx * y;
+        v[i].y = y * z + ay + cy * y;
+    }
+}
 
 static inline void emit(float x, float y, uint32_t c)
 {
     GVtx *v = &gfx_v[gfx_nv++];
-    v->x = (x - VW * 0.5f) * v_zoom + VW * 0.5f + v_ox;
-    v->y = (y - VH * 0.5f) * v_zoom + VH * 0.5f + v_oy;
+    if (!gfx_vt.ident) gfx_xform_inl(&x, &y);
+    v->x = x; v->y = y;
     v->c = c;
 }
 
