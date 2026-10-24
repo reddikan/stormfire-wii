@@ -18,6 +18,7 @@
 #include "../source/game.h"
 #include "../source/game_int.h"
 #include "../source/gfx.h"
+#include "../source/music.h"
 
 #define OW 1280
 #define OH 720
@@ -300,7 +301,8 @@ static void hand_built(Game *g)
 static void screenshots(void)
 {
     char nm[64];
-    const char *p = LEVEL == 0 ? "" : "L2_";
+    char p[16] = "";
+    if (LEVEL) snprintf(p, sizeof p, "L%d_", LEVEL + 1);
     #define SHOT(n) do { snprintf(nm, sizeof nm, "%s%s", p, n); shot(G, nm); } while (0)
     printf("screenshots level %d\n", LEVEL + 1);
     reset_to(G);
@@ -402,7 +404,7 @@ static void bots(void)
         float fire = 0, wave = 0;
         for (int s = 0; s < n; s++) {
             char tag[32];
-            snprintf(tag, sizeof tag, "%s%s", LEVEL ? "L2_" : "", B[b].name);
+            if (LEVEL) snprintf(tag, sizeof tag, "L%d_%s", LEVEL + 1, B[b].name); else snprintf(tag, sizeof tag, "%s", B[b].name);
             Result r = play(B[b].skill, 1000u + (uint32_t)s * 77u, s == 0 && B[b].skill >= 2, tag);
             wins += r.won; fire += (float)r.fire; wave += (float)r.wave;
             printf("  %-8s seed %d: %s wave %2d, fire %2d, %2d towers, %4d gold left, %.0fs\n", B[b].name, s,
@@ -441,6 +443,18 @@ static void reel(void)
         save_ppm(path);
     }
     printf("  reel: %d frames\n", fr);
+    /* the level's music for the same 20 s, for the preview video */
+    snprintf(path, sizeof path, "%s/reel/music.wav", outdir);
+    FILE *f = fopen(path, "wb");
+    if (f) {
+        int tr = game_music(G) < 0 ? LEVEL % MUS_TRACKS : game_music(G), n = MUS_RATE * 20, sr = MUS_RATE, br = MUS_RATE * 2, ds = n * 2, cs = 36 + ds, fmt = 16;
+        short one = 1, ba = 2, bits = 16;
+        fwrite("RIFF", 1, 4, f); fwrite(&cs, 4, 1, f); fwrite("WAVEfmt ", 1, 8, f); fwrite(&fmt, 4, 1, f);
+        fwrite(&one, 2, 1, f); fwrite(&one, 2, 1, f); fwrite(&sr, 4, 1, f); fwrite(&br, 4, 1, f); fwrite(&ba, 2, 1, f); fwrite(&bits, 2, 1, f);
+        fwrite("data", 1, 4, f); fwrite(&ds, 4, 1, f);
+        for (int i = 0; i < n; i++) { short v = music_data(tr)[i % music_len(tr)]; fwrite(&v, 2, 1, f); }
+        fclose(f);
+    }
 }
 
 int main(int argc, char **argv)

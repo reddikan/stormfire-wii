@@ -19,6 +19,17 @@
 
 static const Game *G;
 #define AUTUMN (G->lv->env == ENV_AUTUMN)
+#define HALLOW (G->lv->env == ENV_HALLOW)
+
+/* level 3 props that move: lanterns hanging from branches, glowing jack-o'-lantern faces */
+#define MAX_LANT 26
+typedef struct { float x, y, z, len, ph, amp; int pt; uint8_t row; } Lantern;   /* hook point, string length */
+static Lantern lant[MAX_LANT];
+static int nlant;
+#define MAX_JACK 16
+typedef struct { float x, z, r, ang, ph; uint8_t row; } Jack;
+static Jack jack[MAX_JACK];
+static int njack;
 
 #define TOWER_K 1.3f          /* models are drawn chunkier than their footprint */
 #define ENEMY_K 1.5f
@@ -86,7 +97,14 @@ static void build_lights(void)
 {
     lt_begin();
     float fv = G->fire_vis, fl = flicker(0.0f);
-    float lk = AUTUMN ? 0.45f : 1.0f;              /* point lights matter less in daylight */
+    float lk = AUTUMN ? 0.45f : (HALLOW ? 0.85f : 1.0f);   /* point lights matter less in daylight */
+    if (HALLOW) {
+        for (int i = 0; i < nlant; i++) {
+            float k = 0.85f + 0.15f * sinf(T * 11.0f + lant[i].ph);
+            lt_add(lant[i].x, lant[i].y - lant[i].len, lant[i].z, 0.75f * k, 0.42f * k, 0.14f * k, 2.0f);
+        }
+        for (int i = 0; i < njack; i++) lt_add(jack[i].x, 0.25f, jack[i].z, 0.5f, 0.26f, 0.06f, 1.4f);
+    }
     if (fv > 0.02f)
         lt_add(FIRE_X, 0.9f, FIRE_Z, 1.35f * fv * fl * lk, 0.62f * fv * fl * lk, 0.24f * fv * fl * lk, 2.6f + 2.4f * fv);
     for (int r = 0; r < MH; r++)
@@ -114,6 +132,8 @@ static void build_lights(void)
         if (e->type == EN_WISP) lt_add(e->x, e->y, e->z, 0.25f, 0.6f, 0.45f, 1.6f);
         if (e->type == EN_GOLEM) lt_add(e->x, 1.2f, e->z, 0.2f, 0.6f, 0.9f, 2.6f);
         if (e->type == EN_PUMPKIN) lt_add(e->x, 0.7f, e->z, 0.9f, 0.5f, 0.1f, 2.4f);
+        if (e->type == EN_GHOULKING) lt_add(e->x, 1.2f, e->z, 0.2f, 0.7f, 0.25f, 2.6f);
+        if (e->type == EN_GHOST && e->dash_t <= 0) lt_add(e->x, e->y, e->z, 0.15f, 0.22f, 0.4f, 1.3f);
     }
     for (int i = 0; i < MAX_FL; i++) {
         const FLight *l = &G->fl[i];
@@ -132,6 +152,15 @@ static uint32_t ground_col(int c, int r)
     int k = in_map(c, r) ? G->tile[r][c].kind : -1;
     float v = 0.92f + 0.16f * hf(c, r, 1);
     uint32_t base;
+    if (HALLOW) {                                  /* dead grass, dark dirt, graveyard earth */
+        if (k == TL_PATH || (!in_map(c, r) && outside_lane(c, r))) base = 0x5E4C3EFF;
+        else if (k == TL_LAWN) base = ((c + r) & 1) ? 0x5C5C3CFF : 0x54543AFF;
+        else if (k == TL_FIRE) base = 0x6E665EFF;
+        else if (k == TL_GRAVE) base = 0x4E4636FF;
+        else if (k == TL_TREE) base = 0x403A30FF;
+        else base = 0x36322AFF;
+        return scale_rgb(base, v);
+    }
     if (AUTUMN) {                                  /* golden grass, dirt paths, leaf litter */
         if (k == TL_PATH || (!in_map(c, r) && outside_lane(c, r))) base = 0x9C7A4EFF;
         else if (k == TL_LAWN) base = ((c + r) & 1) ? 0xA6A04CFF : 0x9C984AFF;
@@ -322,13 +351,61 @@ static void draw_autumn_tree(int c, int r, float x, float z, float s)
     r_light_off();
 }
 
+/* end of autumn: bare, crooked trees; some carry a hanging lantern */
+static void draw_bare_tree(int c, int r, float x, float z, float s)
+{
+    int far = !in_map(c, r) && (c < -2 || c > MW + 1 || r < -2 || r > MH + 1);
+    float rot = hf(c, r, 10) * 6.28f, H = 1.55f * s;
+    uint32_t bark = scale_rgb(0x4A4038FF, 0.85f + 0.3f * hf(c, r, 11)), bark2 = scale_rgb(bark, 0.8f);
+    r_light_model(x, 0.9f * s, z);
+    int pt = rc_last_point();
+    rc_sway(0.07f, 0.4f * s, H + 0.4f * s);
+    r_prism(x, 0, z, 0.11f * s, 0.0f, H, 4, rot, bark, bark2);           /* trunk tapering to a point */
+    int nb = far ? 3 : 4;
+    float tipx = x, tipy = H, tipz = z;
+    for (int k = 0; k < nb; k++) {
+        float a = rot + (float)k * (6.28f / (float)nb) + (hf(c, r, 20 + k) - 0.5f) * 0.8f;
+        float by = (0.5f + 0.25f * (float)k / (float)nb + 0.1f * hf(c, r, 30 + k)) * H;
+        float L = (0.5f + 0.3f * hf(c, r, 40 + k)) * s;
+        float dx = cosf(a), dz = sinf(a), up = 0.7f + 0.5f * hf(c, r, 50 + k), l = sqrtf(1 + up * up);
+        float bx = x + dx * 0.03f, bz = z + dz * 0.03f;
+        float ex = bx + dx * L / l, ey = by + up * L / l, ez = bz + dz * L / l;
+        /* a crooked branch: two segments with a kink */
+        float kx = bx + dx * L * 0.5f / l + (hf(c, r, 55 + k) - 0.5f) * 0.12f * s, ky = by + up * L * 0.45f / l, kz = bz + dz * L * 0.5f / l;
+        r_stick(bx, by, bz, kx, ky, kz, 0.08f * s, 0.05f * s, bark);
+        r_stick(kx, ky, kz, ex, ey, ez, 0.05f * s, 0.015f * s, bark);
+        if (!far) {                                           /* a twig off each branch */
+            float a2 = a + 0.9f * (hf(c, r, 60 + k) < 0.5f ? 1.0f : -1.0f);
+            r_stick(kx, ky, kz, kx + cosf(a2) * 0.2f * s, ky + 0.22f * s, kz + sinf(a2) * 0.2f * s, 0.035f * s, 0.01f * s, bark2);
+        }
+        /* remember the branch that reaches out lowest towards the camera, for a lantern */
+        if (ez > tipz + 0.05f || k == 0) { tipx = kx; tipy = ky; tipz = kz; }
+    }
+    rc_sway(0, 0, 1);
+    r_light_off();
+    /* lanterns on trees near the map, but not on every one */
+    int near_map = c >= -2 && c <= MW + 1 && r >= -2 && r <= MH + 1;
+    if (near_map && nlant < MAX_LANT && hf(c, r, 70) < 0.30f) {
+        Lantern *L = &lant[nlant++];
+        L->x = tipx; L->y = tipy; L->z = tipz;
+        L->len = 0.22f + 0.18f * hf(c, r, 71);
+        L->ph = hf(c, r, 72) * 6.28f;
+        float u = (tipy - 0.4f * s) / H;
+        L->amp = 0.07f * u * u;
+        L->pt = pt;
+        L->row = (uint8_t)((int)floorf(z) - ROW_MIN);
+    }
+}
+
 static void draw_tree(int c, int r)
 {
     float x, z, s;
     tree_pos(c, r, &x, &z, &s);
     if (!on_screen(x, 1.0f * s, z, 90.0f)) return;
-    if (AUTUMN) { draw_autumn_tree(c, r, x, z, s); return; }
-    float sway = sinf(T * 1.3f + hf(c, r, 9) * 6.0f) * 0.05f * G->wind;
+    if (HALLOW) { draw_bare_tree(c, r, x, z, s); return; }
+    if (AUTUMN) { rc_sway(0.05f, 0.5f * s, 1.8f * s); draw_autumn_tree(c, r, x, z, s); rc_sway(0, 0, 1); return; }
+    rc_sway(0.08f, 0.3f * s, 2.0f * s);
+    float sway = 0;
     float rot = hf(c, r, 10) * 3.0f;
     r_light_model(x, 0.9f * s, z);
     static const uint32_t TC[3] = { 0x2C6A48FF, 0x35795AFF, 0x40885EFF };
@@ -343,6 +420,32 @@ static void draw_tree(int c, int r)
         r_prism(x + sway * (float)(k + 1), y0, z, rb, 0.0f, y1, far ? 6 : 7, rot + (float)k * 0.4f, col, col);
     }
     r_light_off();
+    rc_sway(0, 0, 1);
+}
+
+/* level 3: a tombstone (or a cross), a little crooked */
+static void draw_grave(float x, float z, float k, float tilt, int cross)
+{
+    uint32_t st = scale_rgb(0x8A8A92FF, 0.8f + 0.3f * k), st2 = scale_rgb(st, 0.8f);
+    r_light_model(x, 0.3f, z);
+    r_prism(x, 0, z + 0.08f, 0.22f, 0.16f, 0.06f, 6, 0, 0x3E3428FF, 0x342A20FF);     /* mound */
+    if (cross) {
+        r_obox(x, 0, z, 0.04f, 0.04f, 0.5f, tilt, st, st2);
+        r_obox(x, 0.3f, z, 0.17f, 0.04f, 0.38f, tilt, st, st2);
+    } else {
+        r_obox(x, 0, z, 0.17f, 0.06f, 0.36f, tilt, st, st2);
+        r_obox(x, 0.36f, z, 0.12f, 0.06f, 0.44f, tilt, st, st2);
+        r_obox(x, 0.44f, z, 0.06f, 0.06f, 0.48f, tilt, st, st2);
+    }
+    r_light_off();
+}
+
+static void draw_jack_body(float x, float z, float pr, float ang)
+{
+    r_light_model(x, 0.2f, z);
+    r_prism(x, 0, z, pr, pr * 0.8f, pr * 1.4f, 8, ang, 0xE87A24FF, 0xD06A1CFF);
+    r_prism(x, pr * 1.4f, z, 0.025f, 0.02f, pr * 1.4f + 0.08f, 4, 0, 0x4A5A20FF, 0x3A4A18FF);
+    r_light_off();
 }
 
 static void draw_bush(int c, int r)
@@ -350,6 +453,24 @@ static void draw_bush(int c, int r)
     float x = (float)c + 0.5f, z = (float)r + 0.5f;
     if (!on_screen(x, 0.3f, z, 60.0f)) return;
     float s = 0.6f + 0.4f * hf(c, r, 12);
+    if (HALLOW) {
+        float h3 = hf(c, r, 3);
+        if (h3 < 0.5f) draw_grave(x + (hf(c, r, 4) - 0.5f) * 0.3f, z, hf(c, r, 5), (hf(c, r, 6) - 0.5f) * 0.5f, h3 < 0.15f);
+        else if (h3 < 0.75f && njack < MAX_JACK) {
+            Jack *j = &jack[njack++];
+            j->x = x; j->z = z; j->r = 0.15f + 0.05f * hf(c, r, 7); j->ang = 1.2f + (hf(c, r, 8) - 0.5f) * 0.8f;
+            j->ph = hf(c, r, 9) * 6.28f; j->row = (uint8_t)(r - ROW_MIN);
+            draw_jack_body(x, z, j->r, j->ang);
+        } else {
+            r_light_model(x, 0.2f, z);
+            for (int k = 0; k < 4; k++) {          /* a dead thorny shrub */
+                float a = (float)k * 1.57f + hf(c, r, 10 + k);
+                r_beam(x, 0.02f, z, cosf(a), 1.0f, sinf(a), 0.3f * s, 0.03f, 0.03f, 0x4A3E30FF);
+            }
+            r_light_off();
+        }
+        return;
+    }
     r_light_model(x, 0.2f, z);
     if (AUTUMN && hf(c, r, 3) < 0.45f) {
         /* a little pumpkin patch */
@@ -388,6 +509,7 @@ static void draw_wall(int c, int r, const Tile *t)
     float v = 0.9f + 0.2f * hf(c, r, 14);
     uint32_t top = scale_rgb(0xA05C46FF, v), side = scale_rgb(0x844A38FF, v), line = 0x4E2C22FF;
     if (AUTUMN) { top = scale_rgb(0xB4A68CFF, v); side = scale_rgb(0x968A72FF, v); line = 0x6A604EFF; }   /* old stone */
+    if (HALLOW) { top = scale_rgb(0x74727CFF, v); side = scale_rgb(0x5C5A66FF, v); line = 0x3A3844FF; }   /* dark mossy stone */
     r_box(x0, 0, z0, x1, h, z1, top, side, skip);
     r_light_model(x0 + 0.5f, h, z0 + 0.5f);
     /* bricks on the top */
@@ -606,9 +728,12 @@ static void draw_tower_at(int c, int r)
     const Tile *tl = &G->tile[r][c];
     float x = (float)c + 0.5f, z = (float)r + 0.5f;
     r_gdisc(x, z, tl->h + 0.004f, 0.5f, 16, 0x00000070, 0x00000000);
-    r_scale(x, tl->h, z, TOWER_K);
+    float wob = t->hurt_t > 0 ? sinf(T * 70.0f) * 0.05f * t->hurt_t : 0.0f;     /* shudders when smashed */
+    r_scale(x + wob, tl->h, z, TOWER_K);
     r_light_model(x, tl->h + 0.5f, z);
-    tower_model(t->type, t->lvl, x, tl->h, z, t->ang, t->anim, t->recoil, t->pulse, t->built, 1);
+    if (t->hurt_t > 0.2f) r_unlit = 1;                                                /* white-hot flash as the blow lands */
+    tower_model(t->type, t->lvl, x + wob, tl->h, z, t->ang, t->anim, t->recoil, t->pulse, t->built, 1);
+    r_unlit = 0;
     r_light_off();
     r_scale_off();
 }
@@ -831,6 +956,148 @@ static void draw_enemy_model(const Enemy *e)
         gfx_blend(BL_ALPHA);
         break;
     }
+    case EN_ZOMBIE: case EN_GHOULKING: {
+        /* shambling dead; the king is a giant with a crown and cape. Arms come up, then slam down on towers */
+        int king = e->type == EN_GHOULKING;
+        float k = king ? 2.2f : 1.0f;
+        float step = sinf(e->anim * 1.4f), lean = sinf(e->anim * 0.7f) * 0.04f * k;
+        float raise = e->act_t > 0 ? (e->act_t > 0.22f ? (0.6f - e->act_t) / 0.38f : e->act_t / 0.22f) : 0.0f;
+        float px = -sa, pz = ca;                                     /* sideways */
+        uint32_t skin = en_tint(e, king ? 0x7A8A5AFF : 0x7AA060FF), cloth = en_tint(e, king ? 0x4A2A5AFF : 0x4A5A78FF);
+        float bx = x + px * lean, bz = z + pz * lean;
+        for (int s2 = -1; s2 <= 1; s2 += 2) {                        /* stiff legs */
+            float f = step * 0.07f * (float)s2 * k;
+            r_obox(x + ca * f + px * 0.08f * k * (float)s2, 0, z + sa * f + pz * 0.08f * k * (float)s2, 0.045f * k, 0.045f * k, 0.2f * k, a, 0x3A3A44FF, 0x2E2E36FF);
+        }
+        r_obox(bx, 0.18f * k, bz, 0.13f * k, 0.09f * k, 0.46f * k, a + 0.1f * step, cloth, scale_rgb(cloth, 0.8f));
+        if (king) {
+            r_beam(bx - ca * 0.12f * k, 0.44f * k, bz - sa * 0.12f * k, -ca, -1.2f, -sa, 0.42f * k, 0.3f * k, 0.03f * k, en_tint(e, 0x5A2A6AFF));   /* cape */
+        }
+        float hx = bx + ca * 0.03f * k, hz = bz + sa * 0.03f * k, hy = 0.46f * k;
+        r_obox(hx, hy, hz, 0.08f * k, 0.08f * k, hy + 0.15f * k, a + lean * 4.0f, skin, scale_rgb(skin, 0.8f));
+        if (king)
+            for (int i = 0; i < 5; i++) {
+                float ang = a + (float)i * 1.2566f;
+                r_prism(hx + cosf(ang) * 0.07f * k, hy + 0.15f * k, hz + sinf(ang) * 0.07f * k, 0.03f * k, 0.0f, hy + 0.24f * k, 4, ang, 0xFFD040FF, 0xD8A020FF);
+            }
+        for (int s2 = -1; s2 <= 1; s2 += 2) {                        /* arms reaching forward, or raised for a slam */
+            float sx = bx + px * 0.15f * k * (float)s2, sz = bz + pz * 0.15f * k * (float)s2, sy = 0.42f * k;
+            float up = -0.05f + raise * 2.2f + sinf(e->anim * 1.4f + (float)s2) * 0.06f;
+            r_beam(sx, sy, sz, ca, up, sa, 0.26f * k, 0.05f * k, 0.05f * k, skin);
+        }
+        gfx_blend(BL_ADD);
+        eyes(hx, hy + 0.1f * k, hz, a, 0.08f * k, 0.035f * k, 0.03f * k, king ? 0x80FF60FF : 0xE8F060FF);
+        if (king) r_glow(hx, hy, hz, 0.7f, RGBA(80, 255, 90, 50));
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_GHOST: {
+        /* a floating sheet; fades almost away while it can't be hit */
+        float y = e->y, ph = e->dash_t > 0 ? 1.0f : 0.0f;
+        float fade = ph > 0 ? 0.22f + 0.08f * sinf(T * 20.0f) : 0.82f;
+        float sway = sinf(e->anim * 0.8f) * 0.04f;
+        r_gdisc(x, z, 0.006f, 0.26f, 16, RGBA(0, 0, 0, (int)(70 * fade)), 0x00000000);
+        r_alpha = fade;
+        r_unlit = 1;                                                    /* ghosts glow on their own */
+        uint32_t sheet = en_tint(e, 0xD8E6F2FF);
+        r_prism(x + sway, y - 0.32f, z, 0.24f, 0.13f, y + 0.08f, 9, a, sheet, scale_rgb(sheet, 0.8f));
+        r_crystal(x + sway * 1.5f, y + 0.14f, z, 0.14f, 0.12f, 0.08f, 8, a, sheet);
+        for (int i = 0; i < 5; i++) {                                    /* ragged hem */
+            float ang = a + (float)i * 1.2566f + e->anim * 0.5f;
+            r_crystal(x + cosf(ang) * 0.2f, y - 0.32f, z + sinf(ang) * 0.2f, 0.06f, 0.02f, 0.1f + 0.03f * sinf(T * 4.0f + (float)i), 4, ang, sheet);
+        }
+        for (int s2 = -1; s2 <= 1; s2 += 2)                             /* little floating arms */
+            r_beam(x - sa * 0.2f * (float)s2, y - 0.02f, z + ca * 0.2f * (float)s2, ca - sa * 0.6f * (float)s2, 0.25f + 0.2f * sinf(T * 3.0f + (float)s2), sa + ca * 0.6f * (float)s2, 0.16f, 0.06f, 0.05f, sheet);
+        for (int s2 = -1; s2 <= 1; s2 += 2)                             /* hollow black eyes */
+            r_crystal(x + sway * 1.5f + ca * 0.12f - sa * 0.05f * (float)s2, y + 0.17f, z + sa * 0.12f + ca * 0.05f * (float)s2, 0.03f, 0.035f, 0.035f, 4, a, 0x101018FF);
+        r_unlit = 0;
+        r_alpha = 1.0f;
+        gfx_blend(BL_ADD);
+        r_glow(x, y, z, 0.5f, RGBA(150, 190, 255, (int)(60 * fade)));
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_SKELETON: {
+        uint32_t bone = en_tint(e, 0xE8E0CCFF), bone2 = scale_rgb(bone, 0.82f);
+        if (e->down_t > 0) {
+            /* a heap of bones, rattling as it pulls itself back together */
+            float jit = e->down_t < 0.7f ? sinf(T * 40.0f) * 0.02f : 0.0f;
+            for (int i = 0; i < 5; i++) {
+                float ang = a + (float)i * 1.3f;
+                r_beam(x + cosf(ang) * 0.08f + jit, 0.02f, z + sinf(ang) * 0.08f, cosf(ang + 1.0f), 0.05f, sinf(ang + 1.0f), 0.18f, 0.035f, 0.035f, bone);
+            }
+            r_crystal(x + ca * 0.1f, 0.06f + jit, z + sa * 0.1f, 0.07f, 0.06f, 0.05f, 6, a, bone);
+            break;
+        }
+        float step = sinf(e->anim * 2.2f), px = -sa, pz = ca;
+        for (int s2 = -1; s2 <= 1; s2 += 2) {
+            float f = step * 0.08f * (float)s2;
+            r_beam(x + ca * f + px * 0.05f * (float)s2, 0.0f, z + sa * f + pz * 0.05f * (float)s2, ca * f * 0.5f, 1.0f, sa * f * 0.5f, 0.2f, 0.03f, 0.03f, bone2);
+        }
+        r_obox(x, 0.19f, z, 0.07f, 0.05f, 0.23f, a, bone, bone2);                       /* pelvis */
+        r_beam(x, 0.22f, z, 0, 1, 0, 0.2f, 0.025f, 0.025f, bone2);                   /* spine */
+        for (int i = 0; i < 3; i++)                                                     /* ribs */
+            r_obox(x, 0.29f + (float)i * 0.045f, z, 0.08f - 0.01f * (float)i, 0.06f, 0.31f + (float)i * 0.045f, a, bone, bone2);
+        for (int s2 = -1; s2 <= 1; s2 += 2) {
+            float sw = step * 0.4f * (float)s2;
+            r_beam(x + px * 0.1f * (float)s2, 0.4f, z + pz * 0.1f * (float)s2, ca * sw, -1.0f, sa * sw, 0.2f, 0.025f, 0.025f, bone2);
+        }
+        r_crystal(x + ca * 0.02f, 0.5f, z + sa * 0.02f, 0.075f, 0.08f, 0.04f, 6, a, bone);   /* skull */
+        r_obox(x + ca * 0.05f, 0.44f, z + sa * 0.05f, 0.04f, 0.045f, 0.47f, a, bone2, bone2);  /* jaw */
+        gfx_blend(BL_ADD);
+        eyes(x, 0.51f, z, a, 0.07f, 0.03f, 0.03f, 0xFF3020FF);
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_BAT: {
+        float y = e->y;
+        r_gdisc(x, z, 0.006f, 0.2f, 16, 0x00000040, 0x00000000);
+        uint32_t body = en_tint(e, 0x2A2030FF);
+        r_crystal(x, y, z, 0.07f, 0.07f, 0.06f, 5, a, body);
+        for (int s2 = -1; s2 <= 1; s2 += 2)
+            r_prism(x + ca * 0.03f - sa * 0.035f * (float)s2, y + 0.04f, z + sa * 0.03f + ca * 0.035f * (float)s2, 0.02f, 0.0f, y + 0.11f, 3, a, body, body);
+        float flap = sinf(e->anim * 6.5f) * 0.9f;
+        for (int s2 = -1; s2 <= 1; s2 += 2) {
+            float px = -sa * (float)s2, pz = ca * (float)s2;
+            float tx = x + px * 0.28f * cosf(flap), ty = y + 0.28f * sinf(flap) * 0.7f, tz = z + pz * 0.28f * cosf(flap);
+            float mx = x + px * 0.16f * cosf(flap) - ca * 0.1f, my = y + 0.12f * sinf(flap), mz = z + pz * 0.16f * cosf(flap) - sa * 0.1f;
+            float s0x, s0y, s1x, s1y, s2x, s2y, s3x, s3y;
+            proj(x + ca * 0.04f, y, z + sa * 0.04f, &s0x, &s0y); proj(tx, ty, tz, &s1x, &s1y);
+            proj(mx, my, mz, &s2x, &s2y); proj(x - ca * 0.05f, y, z - sa * 0.05f, &s3x, &s3y);
+            uint32_t wc = lt_shade(0x3A2440FF, x, y, z, 0.8f + 0.2f * sinf(flap));
+            gfx_tri(s0x, s0y, wc, s1x, s1y, wc, s2x, s2y, wc);
+            gfx_tri(s0x, s0y, wc, s2x, s2y, wc, s3x, s3y, wc);
+        }
+        gfx_blend(BL_ADD);
+        eyes(x, y + 0.02f, z, a, 0.06f, 0.025f, 0.025f, 0xFF3030FF);
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_BREAKER: {
+        /* a hulking grave-robber swinging a tombstone hammer */
+        float step = sinf(e->anim * 1.3f), px = -sa, pz = ca;
+        float raise = e->act_t > 0 ? (e->act_t > 0.22f ? (0.6f - e->act_t) / 0.38f : e->act_t / 0.22f) : 0.0f;
+        uint32_t skin = en_tint(e, 0x5C6A70FF), dark = scale_rgb(skin, 0.75f);
+        if (e->armor_t > 0) skin = col_mix(skin, 0xE8F0FFFF, 0.5f);
+        for (int s2 = -1; s2 <= 1; s2 += 2) {
+            float f = step * 0.1f * (float)s2;
+            r_obox(x + ca * f + px * 0.16f * (float)s2, 0, z + sa * f + pz * 0.16f * (float)s2, 0.09f, 0.09f, 0.22f, a, 0x30343AFF, 0x262A30FF);
+        }
+        r_obox(x, 0.2f, z, 0.24f, 0.2f, 0.62f, a, skin, dark);
+        r_obox(x + ca * 0.14f, 0.5f, z + sa * 0.14f, 0.09f, 0.09f, 0.68f, a, skin, dark);           /* low head */
+        r_beam(x - px * 0.27f, 0.5f, z - pz * 0.27f, ca, -0.4f, sa, 0.22f, 0.08f, 0.08f, skin);      /* free arm */
+        /* hammer: handle from the right hand, a gravestone on the end */
+        float hx = x + px * 0.28f, hz = z + pz * 0.28f, hy = 0.5f;
+        float up = 0.3f + raise * 3.0f;
+        float dl = sqrtf(1.0f + up * up), dx = ca / dl, dy = up / dl, dz = sa / dl;
+        r_beam(hx, hy, hz, dx, dy, dz, 0.42f, 0.04f, 0.04f, 0x4A3A2AFF);
+        float tx = hx + dx * 0.42f, ty = hy + dy * 0.42f, tz = hz + dz * 0.42f;
+        r_obox(tx, ty - 0.12f, tz, 0.07f, 0.13f, ty + 0.12f, a, 0x9A9AA2FF, 0x7A7A82FF);
+        gfx_blend(BL_ADD);
+        eyes(x + ca * 0.14f, 0.62f, z + sa * 0.14f, a, 0.09f, 0.04f, 0.035f, 0x80FF80FF);
+        gfx_blend(BL_ALPHA);
+        break;
+    }
     case EN_PUMPKIN: case EN_GOURD: {
         int king = e->type == EN_PUMPKIN;
         float k = king ? 1.0f : 0.32f;
@@ -904,6 +1171,7 @@ static void build_static(void)
     lt_begin();
     lt_build(0, 1);
     rc_begin();
+    nlant = njack = 0;
     rc_slot(SLOT_GROUND);
     build_ground();
     if (AUTUMN) build_autumn_ground();
@@ -920,6 +1188,9 @@ static void build_static(void)
             const Tile *t = &G->tile[r][c];
             switch (t->kind) {
             case TL_TREE: draw_tree(c, r); break;
+            case TL_GRAVE:
+                draw_grave((float)c + 0.5f + (hf(c, r, 4) - 0.5f) * 0.25f, (float)r + 0.45f, hf(c, r, 5), (hf(c, r, 6) - 0.5f) * 0.4f, hf(c, r, 3) < 0.3f);
+                break;
             case TL_WALL: draw_wall(c, r, t); break;
             case TL_BLOCK: draw_block(c, r, t); break;
             default: break;
@@ -930,11 +1201,57 @@ static void build_static(void)
     built_level = G->level;
 }
 
+/* swinging lanterns and flickering pumpkin faces belonging to this row */
+static void draw_row_props(int row)
+{
+    for (int i = 0; i < njack; i++) {
+        const Jack *j = &jack[i];
+        if (j->row != row) continue;
+        float ca = cosf(j->ang), sa = sinf(j->ang), fx = j->x + ca * j->r, fz = j->z + sa * j->r;
+        float k = 0.75f + 0.25f * sinf(T * 9.0f + j->ph) * sinf(T * 5.3f + j->ph * 2.0f);
+        uint32_t glow = RGBA(255, 180, 60, (int)(230 * k));
+        float ux = -sa, uz = ca, sx[3], sy[3], pr = j->r;
+        gfx_blend(BL_ADD);
+        #define JP(i, u, v) proj(fx + ux * (u) * pr, (v) * pr, fz + uz * (u) * pr, &sx[i], &sy[i])
+        for (int s = -1; s <= 1; s += 2) {
+            JP(0, 0.2f * s, 0.75f); JP(1, 0.5f * s, 0.75f); JP(2, 0.35f * s, 1.0f);
+            gfx_tri(sx[0], sy[0], glow, sx[1], sy[1], glow, sx[2], sy[2], glow);
+        }
+        JP(0, -0.45f, 0.45f); JP(1, 0.45f, 0.45f); JP(2, 0.0f, 0.25f);
+        gfx_tri(sx[0], sy[0], glow, sx[1], sy[1], glow, sx[2], sy[2], glow);
+        #undef JP
+        r_glow(fx, pr * 0.7f, fz, 0.45f, RGBA(255, 140, 40, (int)(110 * k)));
+        gfx_blend(BL_ALPHA);
+    }
+    for (int i = 0; i < nlant; i++) {
+        const Lantern *L = &lant[i];
+        if (L->row != row) continue;
+        /* the hook moves with its branch; the lantern swings like a pendulum underneath */
+        float hx = L->x + rc_sway_of(L->pt) * L->amp, hy = L->y, hz = L->z;
+        float th = 0.25f * sinf(T * 1.6f + L->ph) + 0.08f * sinf(T * 2.9f + L->ph * 1.7f);
+        float tz = 0.10f * sinf(T * 1.2f + L->ph * 0.7f);
+        float lx = hx + sinf(th) * L->len, ly = hy - cosf(th) * L->len, lz = hz + tz * L->len;
+        r_line(hx, hy, hz, lx, ly, lz, 1.2f, 0x1A1410FF, 0x1A1410FF);
+        float k = 0.85f + 0.15f * sinf(T * 11.0f + L->ph) * sinf(T * 7.1f + L->ph * 3.0f);
+        r_light_model(lx, ly, lz);
+        r_prism(lx, ly - 0.04f, lz, 0.065f, 0.0f, ly + 0.03f, 4, th, 0x2A2420FF, 0x221C18FF);        /* cap */
+        r_light_off();
+        r_unlit = 1;
+        r_prism(lx, ly - 0.2f, lz, 0.065f, 0.065f, ly - 0.04f, 4, th + 0.785f, RGBA(255, 200, 110, 255), RGBA((int)(255 * k), (int)(170 * k), 70, 255));
+        r_unlit = 0;
+        gfx_blend(BL_ADD);
+        r_glow(lx, ly - 0.12f, lz, 0.6f * k, RGBA(255, 150, 60, 140));
+        r_glow_cheap(lx, ly - 0.12f, lz, 0.18f, RGBA(255, 230, 160, 220));
+        gfx_blend(BL_ALPHA);
+    }
+}
+
 static void draw_world(void)
 {
     int ghost = G->state == ST_PLAY && can_build(G, G->cx, G->cz);
     for (int r = ROW_MIN; r < ROW_MAX; r++) {
         rc_draw(SLOT_ROW0 + r - ROW_MIN, SHX, SHY);
+        if (HALLOW) draw_row_props(r - ROW_MIN);
         if (r >= 0 && r < MH)
             for (int i = 0; i < MW + 12; i++) {
                 int c = col_order[i];
@@ -1072,6 +1389,7 @@ static void draw_leaves(void)
 
 static void draw_rain(void)
 {
+    if (HALLOW) return;
     if (AUTUMN) { draw_leaves(); return; }
     float f = G->flash;
     uint32_t c = RGBA(170, 190, 235, (int)(60 + 110 * clampf(f, 0, 1)));
@@ -1134,8 +1452,64 @@ static void draw_golden_hour(void)
     gfx_quad4(VW - 80, 0, 0x1E0C0000, VW, 0, 0x1E0C0070, VW, VH, 0x1E0C0070, VW - 80, VH, 0x1E0C0000);
 }
 
+/* dusk on Halloween: a rising moon, cold moonbeams, and thick fog rolling through and over the course */
+static void draw_hallow_night(void)
+{
+    /* low fog banks hugging the ground */
+    for (int i = 0; i < 12; i++) {
+        float sp = 0.22f + 0.07f * (float)(i % 4);
+        float x = fmodf((float)i * 2.9f + T * sp, 28.0f) - 5.0f;
+        float z = (float)((i * 7) % 15) - 1.0f + sinf(T * 0.2f + (float)i) * 0.6f;
+        float a = 62.0f + 20.0f * sinf(T * 0.3f + (float)i * 1.3f);
+        r_glow(x, 0.3f, z, 3.4f, RGBA(150, 160, 192, (int)a));
+    }
+    /* a second layer drifting above the towers, slowly thickening and thinning */
+    for (int i = 0; i < 12; i++) {
+        float sp = 0.35f + 0.08f * (float)(i % 3);
+        float x = fmodf((float)i * 3.7f + 11.0f + T * sp, 30.0f) - 6.0f;
+        float z = (float)((i * 5) % 14) - 0.5f + cosf(T * 0.17f + (float)i * 2.0f) * 0.8f;
+        float a = 30.0f + 34.0f * (0.5f + 0.5f * sinf(T * 0.21f + (float)i * 2.3f));
+        r_glow(x, 1.7f, z, 2.8f, RGBA(176, 184, 214, (int)a));
+    }
+    /* dusk haze at the far edge, purple fading into the dark */
+    gfx_rect_v(0, 0, VW, 170, RGBA(120, 80, 140, 120), RGBA(80, 60, 110, 0));
+    gfx_blend(BL_ADD);
+    /* the moon, top right */
+    float mx = VW * 0.73f, my = 34.0f;
+    gfx_glow(mx, my, 260, RGBA(110, 130, 200, 60));
+    gfx_glow(mx, my, 70, RGBA(200, 210, 255, 90));
+    gfx_blend(BL_ALPHA);
+    gfx_poly(mx, my, 21, 24, 0, RGBA(236, 238, 222, 255));
+    gfx_poly(mx - 6, my - 5, 5, 10, 0, RGBA(200, 202, 190, 255));
+    gfx_poly(mx + 7, my + 4, 4, 10, 0, RGBA(205, 207, 195, 255));
+    gfx_poly(mx + 2, my - 9, 3, 8, 0, RGBA(210, 212, 200, 255));
+    /* thin clouds crossing the moon */
+    for (int i = 0; i < 3; i++) {
+        float cx = fmodf(T * (6.0f + 3.0f * (float)i) + (float)i * 140.0f, VW + 300.0f) - 150.0f;
+        gfx_glow(cx, my + 8.0f * (float)(i - 1), 60.0f + 15.0f * (float)i, RGBA(60, 50, 80, 120));
+    }
+    gfx_blend(BL_ADD);
+    /* moonbeams slanting down from the top right */
+    for (int i = 0; i < 5; i++) {
+        float x0 = VW * 0.62f + (float)i * 120.0f + sinf(T * 0.09f + (float)i * 2.1f) * 20.0f;
+        float w0 = 24.0f + (float)((i * 29) % 3) * 18.0f, w1 = w0 * 2.4f;
+        float a = 12.0f + 8.0f * sinf(T * 0.31f + (float)i * 1.9f);
+        float x1 = x0 - 0.6f * (VH + 60.0f);
+        uint32_t top = RGBA(150, 170, 230, (int)a), bot = RGBA(150, 170, 230, 0);
+        gfx_quad4(x0 - w0 * 0.5f, -20, top, x0 + w0 * 0.5f, -20, top, x1 + w1 * 0.5f, VH + 40, bot, x1 - w1 * 0.5f, VH + 40, bot);
+    }
+    gfx_blend(BL_ALPHA);
+    /* all-over mist and a deep purple vignette */
+    gfx_rect(0, 0, VW, VH, RGBA(120, 130, 160, 30));
+    gfx_rect_v(0, 0, VW, 60, 0x0A061280, 0x0A061200);
+    gfx_rect_v(0, VH - 90, VW, 90, 0x0A061200, 0x0A0612C0);
+    gfx_quad4(0, 0, 0x0A0612A0, 90, 0, 0x0A061200, 90, VH, 0x0A061200, 0, VH, 0x0A0612A0);
+    gfx_quad4(VW - 90, 0, 0x0A061200, VW, 0, 0x0A0612A0, VW, VH, 0x0A0612A0, VW - 90, VH, 0x0A061200);
+}
+
 static void draw_mist_vignette(void)
 {
+    if (HALLOW) { draw_hallow_night(); return; }
     if (AUTUMN) { draw_golden_hour(); return; }
     /* slow drifting ground mist */
     for (int i = 0; i < 7; i++) {
@@ -1203,6 +1577,19 @@ static void draw_world_ui(void)
         gfx_rect(sx - w * 0.5f - 1, sy - 1, w + 2, 5, 0x000000B0);
         gfx_rect(sx - w * 0.5f, sy, w * f, 3, f > 0.5f ? 0x60E060FF : (f > 0.25f ? 0xF0C040FF : 0xF05040FF));
     }
+    /* towers that have been smashed show how much they have left */
+    for (int r = 0; r < MH; r++)
+        for (int c = 0; c < MW; c++) {
+            const Tower *t = &G->tw[r][c];
+            if (t->type < 0 || t->hp >= TOWER_HP[t->lvl] - 0.01f) continue;
+            float sx, sy;
+            proj((float)c + 0.5f, G->tile[r][c].h + 1.25f, (float)r + 0.5f, &sx, &sy);
+            float f = clampf(t->hp / TOWER_HP[t->lvl], 0, 1), w = 30.0f;
+            uint32_t col = f > 0.5f ? 0xF0D040FF : 0xFF5030FF;
+            if (f <= 0.3f && fmodf(T, 0.5f) < 0.25f) col = 0xFFFFFFFF;
+            gfx_rect(sx - w * 0.5f - 1, sy - 1, w + 2, 6, 0x000000C0);
+            gfx_rect(sx - w * 0.5f, sy, w * f, 4, col);
+        }
     /* floating numbers */
     for (int i = 0; i < MAX_POP; i++) {
         const Pop *p = &G->pop[i];
@@ -1285,9 +1672,10 @@ static void draw_hud(void)
     if (G->boss >= 0 && G->en[G->boss].alive) {
         const Enemy *b = &G->en[G->boss];
         float f = clampf(b->hp / b->maxhp, 0, 1);
-        gfx_text_sc(ENEMIES[b->type].name, VW * 0.5f, 84, 1.6f, b->type == EN_PUMPKIN ? 0xFFC060FF : 0xA0E8FFFF);
+        gfx_text_sc(ENEMIES[b->type].name, VW * 0.5f, 84, 1.6f, b->type == EN_PUMPKIN ? 0xFFC060FF : (b->type == EN_GHOULKING ? 0xA0FF90FF : 0xA0E8FFFF));
         gfx_rect(VW * 0.5f - 151, 98, 302, 10, 0x000000C0);
         if (b->type == EN_PUMPKIN) gfx_rect_v(VW * 0.5f - 150, 99, 300 * f, 8, 0xFFC060FF, 0xE06010FF);
+        else if (b->type == EN_GHOULKING) gfx_rect_v(VW * 0.5f - 150, 99, 300 * f, 8, 0xA0FF80FF, 0x30A040FF);
         else gfx_rect_v(VW * 0.5f - 150, 99, 300 * f, 8, 0x80E0FFFF, 0x3080D0FF);
     }
 
@@ -1341,9 +1729,18 @@ static void draw_hud(void)
         if (t->type == TW_FROST) snprintf(buf, sizeof buf, "SLOW %d%%  RANGE %.1f", (int)(d->extra[t->lvl] * 100), d->range[t->lvl]);
         else snprintf(buf, sizeof buf, "DMG %d  RANGE %.1f", (int)d->dmg[t->lvl], d->range[t->lvl]);
         gfx_text_s(buf, px + 10, py + 26, 1.25f, col_a(0xC8D0E0FF, ifade));
-        if (t->lvl + 1 < TW_MAXLVL) {
+        int dmgd = t->hp < TOWER_HP[t->lvl] - 0.01f;
+        if (dmgd) {
+            snprintf(buf, sizeof buf, "HP %d/%d", (int)ceilf(t->hp), (int)TOWER_HP[t->lvl]);
+            gfx_text_sr(buf, px + 228, py + 8, 1.4f, col_a(t->hp > TOWER_HP[t->lvl] * 0.5f ? 0xF0D040FF : 0xFF6040FF, ifade));
+        }
+        if (t->lvl + 1 >= TW_MAXLVL && dmgd) {
+            int c = tower_repair_cost(t);
+            snprintf(buf, sizeof buf, "A: REPAIR %d", c);
+            gfx_text_s(buf, px + 10, py + 41, 1.35f, col_a(G->gold >= c ? 0xFFE070FF : 0xFF7060FF, ifade));
+        } else if (t->lvl + 1 < TW_MAXLVL) {
             int c = d->cost[t->lvl + 1];
-            snprintf(buf, sizeof buf, "A: UPGRADE %d", c);
+            snprintf(buf, sizeof buf, dmgd ? "A: UPGRADE+FIX %d" : "A: UPGRADE %d", c);
             gfx_text_s(buf, px + 10, py + 41, 1.35f, col_a(G->gold >= c ? 0xFFE070FF : 0xFF7060FF, ifade));
         } else gfx_text_s("MAX LEVEL", px + 10, py + 41, 1.35f, col_a(0x90F090FF, ifade));
         snprintf(buf, sizeof buf, "B: SELL %d", tower_sell_value(t));
@@ -1389,15 +1786,16 @@ static void fire_text(const char *s, float cx, float y, float px)
 
 static void draw_title(void)
 {
-    gfx_rect(0, 0, VW, VH, AUTUMN ? 0x1A0C0060 : 0x02040A70);
+    gfx_rect(0, 0, VW, VH, AUTUMN ? 0x1A0C0060 : (HALLOW ? 0x0A061870 : 0x02040A70));
     fire_text("STORMFIRE", VW * 0.5f, 104, 10.0f);
-    gfx_text_sc(AUTUMN ? "HOLD THE FIRE TILL THE SUN GOES DOWN" : "KEEP THE CAMPFIRE BURNING THROUGH THE STORM", VW * 0.5f, 190, 1.8f, AUTUMN ? 0xFFE8C8FF : 0xC8D4F0FF);
+    gfx_text_sc(HALLOW ? "THE DEAD WALK TONIGHT. KEEP THE FIRE LIT." : (AUTUMN ? "HOLD THE FIRE TILL THE SUN GOES DOWN" : "KEEP THE CAMPFIRE BURNING THROUGH THE STORM"),
+                VW * 0.5f, 190, 1.8f, HALLOW ? 0xD8C8FFFF : (AUTUMN ? 0xFFE8C8FF : 0xC8D4F0FF));
     /* level picker */
     char lb[48];
     snprintf(lb, sizeof lb, "LEVEL %d: %s", G->level + 1, G->lv->name);
     float lw = gfx_text_width(lb, 2.4f), nudge = sinf(T * 5.0f) * 3.0f;
     panel(VW * 0.5f - lw * 0.5f - 52, 216, lw + 104, 36, 0x0A0E18C8);
-    gfx_text_sc(lb, VW * 0.5f, 226, 2.4f, AUTUMN ? 0xFFC060FF : 0x90D8FFFF);
+    gfx_text_sc(lb, VW * 0.5f, 226, 2.4f, HALLOW ? 0xC890FFFF : (AUTUMN ? 0xFFC060FF : 0x90D8FFFF));
     gfx_text_s("<", VW * 0.5f - lw * 0.5f - 38 - nudge, 226, 2.4f, 0xFFFFFFC0);
     gfx_text_s(">", VW * 0.5f + lw * 0.5f + 24 + nudge, 226, 2.4f, 0xFFFFFFC0);
     if (fmodf(T, 1.2f) < 0.85f) gfx_text_sc("PRESS A TO START", VW * 0.5f, 272, 2.6f, 0xFFFFFFFF);
@@ -1455,10 +1853,10 @@ static void draw_pause(void)
 {
     gfx_rect(0, 0, VW, VH, 0x02040AA0);
     gfx_text_sc("PAUSED", VW * 0.5f, 120, 5.0f, 0xFFFFFFFF);
-    const char *M[4] = { "RESUME", G->mute ? "SOUND: OFF" : "SOUND: ON", "RESTART", "QUIT TO TITLE" };
-    for (int i = 0; i < 4; i++) {
+    const char *M[5] = { "RESUME", G->music_off ? "MUSIC: OFF" : "MUSIC: ON", G->mute ? "SOUND: OFF" : "SOUND: ON", "RESTART", "QUIT TO TITLE" };
+    for (int i = 0; i < 5; i++) {
         int s = G->menu == i;
-        float y = 200 + (float)i * 42;
+        float y = 190 + (float)i * 40;
         if (s) panel(VW * 0.5f - 140, y - 10, 280, 38, 0xFF904060);
         gfx_text_sc(M[i], VW * 0.5f, y, 2.6f, s ? 0xFFFFFFFF : 0x8090B0FF);
     }
@@ -1471,10 +1869,15 @@ void game_render(const Game *g)
     T = g->time;
     gfx_begin();
     if (built_level != g->level) build_static();
-    float sh = g->shake * g->shake;
-    SHX = sinf(T * 53.0f) * 7.0f * sh; SHY = cosf(T * 41.0f) * 5.0f * sh;
+    float sh = g->shake * sqrtf(g->shake) * 9.0f;                 /* screen shake in pixels */
+    SHX = (sinf(T * 53.0f) * 0.7f + sinf(T * 31.0f + 1.3f) * 0.3f) * sh;
+    SHY = (cosf(T * 41.0f) * 0.7f + sinf(T * 67.0f + 0.4f) * 0.3f) * sh * 0.75f;
     cam_world(SHX, SHY);
-    if (AUTUMN) {
+    if (HALLOW) {
+        /* dusk: cool moonlight with a little purple, branches casting a patchy shade */
+        static const float B[3] = { 0.30f, 0.29f, 0.44f }, U[3] = { 0.05f, 0.05f, 0.08f };
+        lt_set_ambient(B, U, 0.18f);
+    } else if (AUTUMN) {
         static const float B[3] = { 0.66f, 0.47f, 0.33f }, U[3] = { 0.09f, 0.055f, 0.02f };
         lt_set_ambient(B, U, 0.40f);
     } else {
@@ -1482,10 +1885,11 @@ void game_render(const Game *g)
         lt_set_ambient(B, U, 0.0f);
     }
     build_lights();
-    rc_relight();
+    rc_relight(T, G->lv->env == ENV_STORM ? 0.6f + 0.6f * G->wind : 0.6f + 0.8f * G->wind);
 
     /* sky glow behind everything (only visible at the very top) */
-    if (AUTUMN) gfx_rect_v(0, 0, VW, VH, 0x5A3A20FF, 0x2A1A10FF);
+    if (HALLOW) gfx_rect_v(0, 0, VW, VH, 0x2A2040FF, 0x100C18FF);
+    else if (AUTUMN) gfx_rect_v(0, 0, VW, VH, 0x5A3A20FF, 0x2A1A10FF);
     else gfx_rect_v(0, 0, VW, VH, 0x0A1220FF, 0x05080EFF);
 
     draw_ground();        dbg_nv[0] = gfx_nv;

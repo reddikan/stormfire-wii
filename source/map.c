@@ -5,6 +5,7 @@
  *   .  path (enemies walk here)          F  the campfire plaza (3 x 3, always in the middle)
  *   #  wall (build on top)               t  wall with a torch
  *   ,  grass lawn (build here too)       T  forest (nothing goes here)
+ *   G  graveyard (nothing goes here)
  *   r o y g m b p c   coloured blocks (build on top): red orange yellow green mint blue purple cyan
  */
 #include "game_int.h"
@@ -18,21 +19,30 @@ const TowerDef TOWERS[TW_TYPES] = {
 };
 
 const EnemyDef ENEMIES[EN_TYPES] = {
-    /* name           hp    speed  size   fly bounty dmg armor boss split            colour */
-    { "CRAWLER",       30,  1.00f, 0.26f, 0,   5,   1,  0,   0, -1, 0,           0x3CB4E6FF },
-    { "GRUNT",         85,  0.72f, 0.34f, 0,   8,   1,  0,   0, -1, 0,           0x9A5CE8FF },
-    { "BRUTE",        360,  0.48f, 0.48f, 0,  20,   3,  0,   0, -1, 0,           0xC8483CFF },
-    { "WISP",          50,  0.85f, 0.30f, 1,   6,   1,  0,   0, -1, 0,           0x9CFFD8FF },
-    { "STORM GOLEM", 1600,  0.30f, 0.80f, 0, 150,  10,  0,   1, -1, 0,           0x7C8894FF },
+    /* name           hp    speed  size   fly bounty dmg armor boss split            colour       smash reach cd   summon */
+    { "CRAWLER",       30,  1.00f, 0.26f, 0,   5,   1,  0,   0, -1, 0,           0x3CB4E6FF,  0, 0, 0,     -1, 0, 0 },
+    { "GRUNT",         85,  0.72f, 0.34f, 0,   8,   1,  0,   0, -1, 0,           0x9A5CE8FF,  0, 0, 0,     -1, 0, 0 },
+    { "BRUTE",        360,  0.48f, 0.48f, 0,  20,   3,  0,   0, -1, 0,           0xC8483CFF,  0, 0, 0,     -1, 0, 0 },
+    { "WISP",          50,  0.85f, 0.30f, 1,   6,   1,  0,   0, -1, 0,           0x9CFFD8FF,  0, 0, 0,     -1, 0, 0 },
+    { "STORM GOLEM", 1600,  0.30f, 0.80f, 0, 150,  10,  0,   1, -1, 0,           0x7C8894FF,  0, 0, 0,     -1, 0, 0 },
     /* level 2 */
-    { "BEETLE",       150,  0.62f, 0.36f, 0,  12,   1,  5,   0, -1, 0,           0x2E8C7CFF },
-    { "SLIME",         95,  0.66f, 0.36f, 0,   8,   1,  0,   0, EN_SLIMELET, 2,  0x88D848FF },
-    { "SLIMELET",      26,  0.72f, 0.22f, 0,   3,   1,  0,   0, -1, 0,           0xA8E860FF },
-    { "FOX",           70,  0.85f, 0.30f, 0,   8,   1,  0,   0, -1, 0,           0xE8702CFF },
-    { "CROW",          75,  0.95f, 0.30f, 1,   9,   1,  0,   0, -1, 0,           0x3A3044FF },
-    { "PUMPKIN KING", 2000, 0.27f, 0.85f, 0, 200,  10,  4,   1, EN_GOURD, 4,     0xF08020FF },
-    { "GOURD",         45,  0.95f, 0.24f, 0,   3,   1,  0,   0, -1, 0,           0xF8B030FF },
+    { "BEETLE",       150,  0.62f, 0.36f, 0,  12,   1,  5,   0, -1, 0,           0x2E8C7CFF,  0, 0, 0,     -1, 0, 0 },
+    { "SLIME",         95,  0.66f, 0.36f, 0,   8,   1,  0,   0, EN_SLIMELET, 2,  0x88D848FF,  0, 0, 0,     -1, 0, 0 },
+    { "SLIMELET",      26,  0.72f, 0.22f, 0,   3,   1,  0,   0, -1, 0,           0xA8E860FF,  0, 0, 0,     -1, 0, 0 },
+    { "FOX",           70,  0.85f, 0.30f, 0,   8,   1,  0,   0, -1, 0,           0xE8702CFF,  0, 0, 0,     -1, 0, 0 },
+    { "CROW",          75,  0.95f, 0.30f, 1,   9,   1,  0,   0, -1, 0,           0x3A3044FF,  0, 0, 0,     -1, 0, 0 },
+    { "PUMPKIN KING", 2000, 0.27f, 0.85f, 0, 200,  10,  4,   1, EN_GOURD, 4,     0xF08020FF,  0, 0, 0,     EN_GOURD, 2, 6.0f },
+    { "GOURD",         45,  0.95f, 0.24f, 0,   3,   1,  0,   0, -1, 0,           0xF8B030FF,  0, 0, 0,     -1, 0, 0 },
+    /* level 3: some of these smash towers on their way past */
+    { "ZOMBIE",       200,  0.42f, 0.34f, 0,  15,   1,  0,   0, -1, 0,           0x6E9A5AFF, 10, 1.15f, 1.8f, -1, 0, 0 },
+    { "GHOST",        110,  0.70f, 0.32f, 1,  14,   1,  0,   0, -1, 0,           0xD8E8F0FF,  0, 0, 0,     -1, 0, 0 },
+    { "SKELETON",      80,  0.85f, 0.30f, 0,  12,   1,  0,   0, -1, 0,           0xE8E0CCFF,  0, 0, 0,     -1, 0, 0 },
+    { "BAT",           34,  1.15f, 0.20f, 1,   5,   1,  0,   0, -1, 0,           0x2A2030FF,  0, 0, 0,     -1, 0, 0 },
+    { "GRAVEBREAKER", 700,  0.36f, 0.50f, 0,  45,   3,  4,   0, -1, 0,           0x5C6A70FF, 40, 1.25f, 2.2f, -1, 0, 0 },
+    { "GHOUL KING",  2400,  0.24f, 0.85f, 0, 250,  10,  4,   1, EN_ZOMBIE, 3,    0x7A8A5AFF, 70, 1.5f, 2.4f,  EN_ZOMBIE, 2, 7.0f },
 };
+
+const float TOWER_HP[TW_MAXLVL] = { 100, 150, 200 };
 
 #define C GATE_CYCLE
 #define R GATE_RANDOM
@@ -70,6 +80,24 @@ static const WaveDef WAVES2[] = {
     { 3, 6, 5.28f, { {EN_FOX, 26, C, 0, 0.4f}, {EN_BEETLE, 12, C, 4, 1.0f}, {EN_CROW, 14, A, 6, 0.55f} } },
     { 5, 6, 5.76f, { {EN_PUMPKIN, 1, 0, 4, 1.0f}, {EN_BEETLE, 8, C, 0, 2.2f}, {EN_SLIME, 14, C, 3, 0.8f},
                      {EN_CROW, 12, A, 10, 0.65f}, {EN_FOX, 24, R, 16, 0.35f} } },
+};
+
+/* level 3: the dead walk - zombies and gravebreakers smash towers, ghosts fade out of reach, skeletons get back up */
+static const WaveDef WAVES3[] = {
+    /* n gates hp x  groups: {type, count, gate, delay, gap} */
+    { 2, 2, 0.80f, { {EN_ZOMBIE, 5, C, 0, 2.4f}, {EN_BAT, 5, A, 8, 0.8f} } },
+    { 2, 2, 0.91f, { {EN_SKELETON, 10, C, 0, 1.2f}, {EN_ZOMBIE, 4, C, 6, 2.0f} } },
+    { 2, 4, 1.05f, { {EN_GHOST, 6, A, 0, 1.6f}, {EN_SKELETON, 8, C, 3, 1.0f} } },
+    { 2, 4, 1.22f, { {EN_ZOMBIE, 10, C, 0, 1.2f}, {EN_BAT, 14, A, 5, 0.35f} } },
+    { 2, 6, 1.43f, { {EN_BREAKER, 2, C, 0, 6.0f}, {EN_SKELETON, 14, C, 2, 0.7f} } },
+    { 2, 6, 1.68f, { {EN_GHOST, 10, A, 0, 1.0f}, {EN_ZOMBIE, 12, C, 2, 0.9f} } },
+    { 3, 6, 1.96f, { {EN_BAT, 20, A, 0, 0.3f}, {EN_SKELETON, 16, C, 2, 0.6f}, {EN_BREAKER, 2, C, 8, 5.0f} } },
+    { 3, 6, 2.27f, { {EN_ZOMBIE, 16, C, 0, 0.7f}, {EN_GHOST, 10, A, 4, 0.8f}, {EN_BEETLE, 6, C, 8, 1.2f} } },
+    { 2, 6, 2.62f, { {EN_BREAKER, 5, C, 0, 3.0f}, {EN_SKELETON, 20, R, 3, 0.45f} } },
+    { 3, 6, 3.01f, { {EN_GHOST, 16, A, 0, 0.6f}, {EN_ZOMBIE, 18, C, 2, 0.6f}, {EN_BAT, 16, A, 8, 0.3f} } },
+    { 3, 6, 3.43f, { {EN_SKELETON, 26, C, 0, 0.4f}, {EN_BREAKER, 6, C, 4, 2.4f}, {EN_GHOST, 12, A, 6, 0.6f} } },
+    { 5, 6, 3.78f, { {EN_GHOULKING, 1, 0, 4, 1.0f}, {EN_ZOMBIE, 14, C, 0, 1.0f}, {EN_SKELETON, 20, C, 3, 0.5f},
+                     {EN_GHOST, 10, A, 10, 0.8f}, {EN_BAT, 12, A, 16, 0.4f} } },
 };
 #undef C
 #undef R
@@ -117,6 +145,26 @@ const LevelDef LEVELS[] = {
         { {3, 0}, {17, 12}, {18, 3}, {0, 10}, {15, 0}, {8, 12} },
         WAVES2, NW(WAVES2), ENV_AUTUMN, 240,
     },
+    {   "HALLOWS EVE", "THE GHOUL KING RISES!",
+        {   /* long zigzag lanes into all four sides of the fire, and a graveyard in the corner */
+            "TT.TTTTTTTTTTTTT.TT",
+            "T#.##....#TT#....#T",
+            "To....pp.#gg#.##ooT",
+            "T#oo###p......#gg#T",
+            "T...#,,#g.g###...pT",
+            "T.#.#pp#FFF#oo.#.#T",
+            "T.#.#...FFF....#...",
+            "..g.#.##FFF#ppp#ooT",
+            "Too...#p#..#gg##GGT",
+            "T,#oo##........#GGT",
+            "T,,#pp#.#oo#...#GGT",
+            "T,,#....#TT#.###GGT",
+            "TTTT.TTTTTTT.TTTTTT",
+        },
+        /* NW, S, E, W, NE, SW */
+        { {2, 0}, {12, 12}, {18, 6}, {0, 7}, {16, 0}, {4, 12} },
+        WAVES3, NW(WAVES3), ENV_HALLOW, 280,
+    },
 };
 const int NUM_LEVELS = NW(LEVELS);
 
@@ -132,6 +180,7 @@ void map_load(Game *g)
             case 'F': t->kind = TL_FIRE; break;
             case ',': t->kind = TL_LAWN; break;
             case 'T': t->kind = TL_TREE; break;
+            case 'G': t->kind = TL_GRAVE; break;
             case 't': t->kind = TL_WALL; t->torch = 1; t->h = 0.5f; break;
             case '#': t->kind = TL_WALL; t->h = 0.5f; break;
             default: {

@@ -80,6 +80,8 @@ void r_prism(float x, float y0, float z, float rb, float rt, float y1, int n, fl
 void r_crystal(float x, float y, float z, float r, float up, float down, int n, float rot, uint32_t c);
 /* a slab tilted towards ang (for barrels): a box from p0 along direction (dx, dy, dz) */
 void r_beam(float x, float y, float z, float dx, float dy, float dz, float len, float w, float h, uint32_t c);
+/* a cheap tapered stick (branches): a single quad turned to face the camera, w0 wide at p0, w1 at p1 */
+void r_stick(float x0, float y0, float z0, float x1, float y1, float z1, float w0, float w1, uint32_t c);
 
 /* ---- static geometry cache ----
  * The scenery never moves, so it is projected once and stored. Each frame only its colours are
@@ -87,7 +89,11 @@ void r_beam(float x, float y, float z, float dx, float dy, float dz, float len, 
 void rc_begin(void);                  /* start recording: r_face / r_gquad_lit go into the cache */
 void rc_slot(int slot);               /* following geometry belongs to this slot */
 void rc_end(void);
-void rc_relight(void);                /* sample the lights for every cached point (after lt_build) */
+void rc_relight(float t, float wind); /* sample the lights for every cached point (after lt_build), and the sway */
+/* record the next shapes as swaying: amp world units at y1, nothing at y0 (trees in the wind) */
+void rc_sway(float amp, float y0, float y1);
+int  rc_last_point(void);             /* light point of the last r_light_model while recording */
+float rc_sway_of(int point);          /* that point's sway this frame, -1..1 times the wind */
 void rc_draw(int slot, float shx, float shy);
 extern int rc_recording;
 extern int rc_verts;

@@ -2,6 +2,7 @@
  * STORMFIRE - game logic: towers, enemies, waves, levels, the weather. Drawing is in draw.c.
  */
 #include "game_int.h"
+#include "music.h"
 
 #include <math.h>
 #include <string.h>
@@ -41,13 +42,22 @@ int game_pop_sound(Game *g, int *pitch, float *pan)
 }
 
 int game_speed(const Game *g) { return (g->state == ST_PLAY && g->fast) ? 2 : 1; }
+int game_music(const Game *g) { return g->music_off ? -1 : g->level % MUS_TRACKS; }
 
 /* ------------------------------------------------------------------ */
 /* towers                                                              */
 /* ------------------------------------------------------------------ */
 int tower_cost(int type, int lvl) { return TOWERS[type].cost[lvl]; }
 float tower_range(const Tower *t) { return TOWERS[t->type].range[t->lvl]; }
-int tower_sell_value(const Tower *t) { return (int)(t->spent * 0.7f + 0.5f); }
+int tower_sell_value(const Tower *t)
+{
+    float v = t->spent * 0.7f * (0.4f + 0.6f * clampf(t->hp / TOWER_HP[t->lvl], 0, 1));   /* wrecked-ish towers sell for less */
+    return (int)(v + 0.5f);
+}
+int tower_repair_cost(const Tower *t)
+{
+    return 5 + (int)((1.0f - clampf(t->hp / TOWER_HP[t->lvl], 0, 1)) * (float)TOWERS[t->type].cost[0] * 0.8f);
+}
 
 int can_build(const Game *g, int cx, int cz)
 {
@@ -168,6 +178,12 @@ static float wave_hpmul(const Game *g)
     return g->lv->waves[w].hpmul * WAVE1;
 }
 
+/* ghosts fade out of reach for a moment; a collapsed skeleton is just a heap of bones */
+static int untouchable(const Enemy *e)
+{
+    return (e->type == EN_GHOST && e->dash_t > 0) || e->down_t > 0;
+}
+
 static void set_target(Game *g, Enemy *e)
 {
     /* walk to the centre of tile (cx, cz), shifted sideways by the enemy's lane */
@@ -199,11 +215,13 @@ static void spawn_enemy(Game *g, int type, int gate)
     e->lane = frand2(g) * (d->boss ? 0.0f : 0.17f);
     if (d->boss) g->boss = slot;
     if (type == EN_FOX) e->dash_t = -(0.5f + frand(g) * 2.0f);
-    if (type == EN_PUMPKIN) e->spawn_t = 6.0f;
+    if (d->summon_n > 0) e->spawn_t = d->summon_every;
+    if (type == EN_GHOST) e->dash_t = -(1.0f + frand(g) * 1.5f);
+    e->smash_t = 1.0f;
     if (d->fly) {
         float a = frand(g) * TAU;
         e->x = FIRE_X + cosf(a) * 12.5f; e->z = FIRE_Z + sinf(a) * 8.5f;
-        e->y = type == EN_CROW ? 1.6f : 1.3f;
+        e->y = type == EN_CROW ? 1.6f : (type == EN_GHOST ? 1.0f : 1.3f);
         e->tx = FIRE_X; e->tz = FIRE_Z;
         e->ang = atan2f(FIRE_Z - e->z, FIRE_X - e->x);
         e->prog = 20.0f;
@@ -228,6 +246,7 @@ static void leak(Game *g, Enemy *e, int idx)
     g->leak_by[e->type] += dmg;
     g->fire_hit = 1.0f;
     g->fire_flash = 1.0f;
+    g->shake = fmaxf(g->shake, dmg >= 10 ? 0.9f : 0.3f);
     e->alive = 0;
     if (idx == g->boss) g->boss = -1;
     for (int i = 0; i < 6; i++) {
@@ -280,7 +299,7 @@ static void spawn_child(Game *g, const Enemy *parent, int type)
 static void hurt(Game *g, int idx, float dmg)
 {
     Enemy *e = &g->en[idx];
-    if (!e->alive || e->inv_t > 0) return;
+    if (!e->alive || e->inv_t > 0 || untouchable(e)) return;
     float arm = ENEMIES[e->type].armor;
     if (arm > 0) {
         float d2 = dmg - arm;
@@ -294,6 +313,15 @@ static void hurt(Game *g, int idx, float dmg)
     e->hp -= dmg;
     e->hit_t = 0.12f;
     if (e->hp > 0) return;
+    if (e->type == EN_SKELETON && !e->revived) {
+        /* falls apart... and pulls itself back together a moment later */
+        e->revived = 1;
+        e->hp = 0;
+        e->down_t = 2.6f;
+        debris(g, e->x, 0.3f, e->z, 5, 0xE8E0CCFF, 0.08f);
+        snd(g, SFX_CRUNCH, 170 + (int)(frand(g) * 20), e->x);
+        return;
+    }
     e->alive = 0;
     g->kills++;
     const EnemyDef *d = &ENEMIES[e->type];
@@ -304,7 +332,8 @@ static void hurt(Game *g, int idx, float dmg)
     snprintf(t, sizeof t, "+%d", d->bounty);
     popup(g, e->x, e->y + 0.9f, e->z, t, 0xFFD860FF);
     float s = d->size;
-    int big = d->boss || e->type == EN_BRUTE || e->type == EN_BEETLE;
+    int big = d->boss || e->type == EN_BRUTE || e->type == EN_BEETLE || e->type == EN_BREAKER || e->type == EN_ZOMBIE;
+    if (big) g->shake = fmaxf(g->shake, d->boss ? 1.0f : (e->type == EN_BREAKER ? 0.45f : 0.22f));
     debris(g, e->x, e->y + s * 0.6f, e->z, d->boss ? 26 : (big ? 12 : 6), d->color, s * 0.35f);
     sparks(g, e->x, e->y + s * 0.6f, e->z, d->boss ? 40 : 10, 0xFFD080FF, 2.6f);
     flight(g, e->x, e->y + 0.5f, e->z, 0xFFB060FF, big ? 1.6f : 0.9f, d->boss ? 5.0f : 2.0f, 0.35f);
@@ -321,6 +350,33 @@ static void hurt(Game *g, int idx, float dmg)
         snd(g, SFX_POP, 110 + (int)(frand(g) * 40), e->x);
     }
     if (idx == g->boss) g->boss = -1;
+}
+
+/* a smasher's blow lands on the tower at (c, r); at zero health the tower is wrecked */
+static void tower_smash(Game *g, const Enemy *e, int c, int r, float dmg)
+{
+    Tower *t = &g->tw[r][c];
+    if (t->type < 0) return;
+    float x = (float)c + 0.5f, z = (float)r + 0.5f, h = g->tile[r][c].h;
+    int boss = ENEMIES[e->type].boss;
+    t->hp -= dmg;
+    t->hurt_t = 0.35f;
+    debris(g, x, h + 0.5f, z, 4, 0x8C8C9CFF, 0.08f);
+    sparks(g, x, h + 0.5f, z, 8, 0xFFD8A0FF, 2.0f);
+    ring(g, e->x + cosf(e->ang) * 0.6f, 0.04f, e->z + sinf(e->ang) * 0.6f, 0.1f, boss ? 1.6f : 0.9f, 0.35f, 0xC8B090C0);
+    g->shake = fmaxf(g->shake, boss ? 0.7f : (dmg >= 30 ? 0.5f : 0.28f));
+    snd(g, SFX_CRUNCH, 140 + (int)(frand(g) * 20), x);
+    if (t->hp > 0) return;
+    /* wrecked */
+    debris(g, x, h + 0.5f, z, 16, TOWERS[t->type].color, 0.13f);
+    debris(g, x, h + 0.3f, z, 8, 0xA0A4B0FF, 0.11f);
+    smoke(g, x, h + 0.3f, z, 8, 0.45f, 0x50505890);
+    flight(g, x, h + 0.8f, z, 0xFFA060FF, 1.6f, 2.5f, 0.4f);
+    popup(g, x, h + 1.2f, z, "WRECKED!", 0xFF7050FF);
+    g->shake = fmaxf(g->shake, 0.8f);
+    snd(g, SFX_BOOM, 100, x);
+    snd(g, SFX_CRUNCH, 100, x);
+    t->type = -1;
 }
 
 static void update_enemies(Game *g, float dt)
@@ -346,15 +402,62 @@ static void update_enemies(Game *g, float dt)
                 if (e->dash_t >= 0) e->dash_t = 0.55f;
             }
         }
-        if (e->type == EN_PUMPKIN && !e->entering) {
-            /* the king drops gourds as he goes */
+        const EnemyDef *ed = &ENEMIES[e->type];
+        if (ed->summon_n > 0 && !e->entering) {
+            /* the kings drop minions as they go (gourds, or zombies clawing out of the ground) */
             e->spawn_t -= dt;
             if (e->spawn_t <= 0) {
-                e->spawn_t = 6.0f;
-                for (int k = 0; k < 2; k++) spawn_child(g, e, EN_GOURD);
-                sparks(g, e->x, 0.6f, e->z, 12, 0xFFB040FF, 2.0f);
-                snd(g, SFX_POP, 80, e->x);
+                e->spawn_t = ed->summon_every;
+                for (int k = 0; k < ed->summon_n; k++) spawn_child(g, e, ed->summon_type);
+                sparks(g, e->x, 0.6f, e->z, 12, e->type == EN_GHOULKING ? 0x90FF80FF : 0xFFB040FF, 2.0f);
+                debris(g, e->x, 0.1f, e->z, 6, 0x4A3A2AFF, 0.08f);
+                snd(g, e->type == EN_GHOULKING ? SFX_CRUNCH : SFX_POP, 80, e->x);
             }
+        }
+        if (e->type == EN_GHOST) {
+            /* fade out of reach for a moment, then back */
+            if (e->dash_t > 0) { e->dash_t -= dt; if (e->dash_t <= 0) e->dash_t = -(1.8f + frand(g) * 1.0f); }
+            else { e->dash_t += dt; if (e->dash_t >= 0) e->dash_t = 1.2f; }
+        }
+        if (e->down_t > 0) {
+            /* a heap of bones: wait, then stand back up with half health */
+            e->down_t -= dt;
+            if (e->down_t <= 0) {
+                e->hp = e->maxhp * 0.5f;
+                sparks(g, e->x, 0.3f, e->z, 6, 0xE8E0CCFF, 1.2f);
+                snd(g, SFX_CRUNCH, 200, e->x);
+            }
+            continue;
+        }
+        if (ed->smash > 0 && !e->entering) {
+            /* smash any tower in reach: stop, wind up, slam */
+            e->smash_t -= dt;
+            if (e->act_t > 0) {
+                e->act_t -= dt;
+                if (!e->act_hit && e->act_t < 0.22f) { e->act_hit = 1; tower_smash(g, e, e->act_c, e->act_r, ed->smash); }
+                continue;
+            }
+            if (e->smash_t <= 0) {
+                int bc = -1, br = -1;
+                float bd = ed->reach * ed->reach;
+                int c0 = (int)floorf(e->x), r0 = (int)floorf(e->z);
+                for (int r = r0 - 2; r <= r0 + 2; r++) for (int c = c0 - 2; c <= c0 + 2; c++) {
+                    if (c < 0 || r < 0 || c >= MW || r >= MH || g->tw[r][c].type < 0) continue;
+                    float dx = (float)c + 0.5f - e->x, dz = (float)r + 0.5f - e->z, dd = dx * dx + dz * dz;
+                    if (dd < bd) { bd = dd; bc = c; br = r; }
+                }
+                if (bc >= 0) {
+                    e->act_t = 0.6f; e->act_hit = 0; e->act_c = (int8_t)bc; e->act_r = (int8_t)br;
+                    e->smash_t = ed->smash_cd;
+                    e->ang = atan2f((float)br + 0.5f - e->z, (float)bc + 0.5f - e->x);
+                    continue;
+                }
+            }
+        }
+        if (ed->boss || e->type == EN_BREAKER) {
+            /* heavy footsteps */
+            int n = (int)(e->anim * 0.4f);
+            if (n != e->step_n) { e->step_n = n; g->shake = fmaxf(g->shake, ed->boss ? 0.32f : 0.16f); }
         }
         e->anim += dt * spd * 6.0f;
         float dx = e->tx - e->x, dz = e->tz - e->z, d = sqrtf(dx * dx + dz * dz);
@@ -366,7 +469,10 @@ static void update_enemies(Game *g, float dt)
             e->ang += da * clampf(dt * 10.0f, 0, 1);
         }
         if (e->fly) {
-            e->y = (e->type == EN_CROW ? 1.6f + sinf(e->anim * 0.5f) * 0.3f : 1.3f + sinf(e->anim * 0.9f) * 0.12f);
+            if (e->type == EN_CROW) e->y = 1.6f + sinf(e->anim * 0.5f) * 0.3f;
+            else if (e->type == EN_GHOST) e->y = 0.9f + sinf(e->anim * 0.6f) * 0.15f;
+            else if (e->type == EN_BAT) e->y = 1.3f + sinf(e->anim * 1.7f) * 0.25f + sinf(e->anim * 0.7f) * 0.15f;
+            else e->y = 1.3f + sinf(e->anim * 0.9f) * 0.12f;
             if (d <= 0.6f) { leak(g, e, i); continue; }
             e->x += dx / d * step; e->z += dz / d * step;
             e->prog = d;
@@ -469,7 +575,7 @@ static int find_target(Game *g, float x, float z, float range, int air, int skip
     float bp = 1e9f, r2 = range * range;
     for (int i = 0; i < MAX_EN; i++) {
         const Enemy *e = &g->en[i];
-        if (!e->alive || i == skip_mask_idx) continue;
+        if (!e->alive || i == skip_mask_idx || untouchable(e)) continue;
         if (e->fly && !air) continue;
         if (e->entering && e->prog > 30.0f) continue;
         float dx = e->x - x, dz = e->z - z;
@@ -574,7 +680,7 @@ static void fire_tower(Game *g, int cx, int cz, Tower *t, int target)
             float bd = 1.7f * 1.7f;
             for (int i = 0; i < MAX_EN; i++) {
                 const Enemy *q = &g->en[i];
-                if (!q->alive) continue;
+                if (!q->alive || untouchable(q)) continue;
                 int used = 0;
                 for (int k = 0; k < nh; k++) if (hit[k] == i) used = 1;
                 if (used) continue;
@@ -584,6 +690,7 @@ static void fire_tower(Game *g, int cx, int cz, Tower *t, int target)
             cur = nb;
         }
         flight(g, x, h + 1.2f, z, d->glow, 1.4f, 2.6f, 0.18f);
+        g->shake = fmaxf(g->shake, 0.14f);
         t->pulse = 1.0f;
         snd(g, SFX_ZAP, 112 + (int)(frand(g) * 30), x);
         break;
@@ -601,6 +708,7 @@ static void update_towers(Game *g, float dt)
             t->anim += dt;
             t->built += dt * 2.5f; if (t->built > 1) t->built = 1;
             t->recoil -= dt * 5.0f; if (t->recoil < 0) t->recoil = 0;
+            t->hurt_t -= dt; if (t->hurt_t < 0) t->hurt_t = 0;
             t->pulse -= dt * 2.5f; if (t->pulse < 0) t->pulse = 0;
             t->cd -= dt;
             float x = (float)cx + 0.5f, z = (float)cz + 0.5f;
@@ -665,7 +773,7 @@ static void update_shots(Game *g, float dt)
                 Part *p = part(g, PT_GLOW, b->ex, 0.35f, b->ez);
                 p->life = p->max = 0.3f; p->size = b->splash * 1.2f; p->c = 0xFF9030FF;
                 flight(g, b->ex, 0.6f, b->ez, 0xFF9040FF, 2.2f, 3.2f, 0.4f);
-                g->shake = fmaxf(g->shake, 0.25f);
+                g->shake = fmaxf(g->shake, 0.34f);
                 snd(g, SFX_BOOM, 116 + (int)(frand(g) * 24), b->ex);
                 b->alive = 0;
                 continue;
@@ -768,6 +876,7 @@ static void update_leaves(Game *g, float dt)
 
 static void update_rain(Game *g, float dt)
 {
+    if (g->lv->env == ENV_HALLOW) return;
     if (g->lv->env != ENV_STORM) { update_leaves(g, dt); return; }
     for (int i = 0; i < MAX_DROP; i++) {
         Drop *d = &g->drop[i];
@@ -790,10 +899,10 @@ static void lightning_strike(Game *g)
     int target = -1;
     if (g->state == ST_PLAY && frand(g) < 0.45f) {
         int n = 0;
-        for (int i = 0; i < MAX_EN; i++) if (g->en[i].alive && !g->en[i].entering) n++;
+        for (int i = 0; i < MAX_EN; i++) if (g->en[i].alive && !g->en[i].entering && !untouchable(&g->en[i])) n++;
         if (n > 0) {
             int pick = (int)(frand(g) * n) % n;
-            for (int i = 0; i < MAX_EN; i++) if (g->en[i].alive && !g->en[i].entering) { if (pick-- == 0) { target = i; break; } }
+            for (int i = 0; i < MAX_EN; i++) if (g->en[i].alive && !g->en[i].entering && !untouchable(&g->en[i])) { if (pick-- == 0) { target = i; break; } }
         }
     }
     if (target >= 0) { x = g->en[target].x; z = g->en[target].z; }
@@ -948,6 +1057,7 @@ void game_init(Game *g)
     memset(g, 0, sizeof *g);
     g->rng = 0x9E3779B9u;
     audio_init();
+    music_init();
     game_set_level(g, 0);
 }
 
@@ -995,9 +1105,16 @@ static void play_input(Game *g, const Input *in, float dt)
     float tx = (float)g->cx + 0.5f, tz = (float)g->cz + 0.5f, th = g->tile[g->cz][g->cx].h;
     if (in->pressed & BTN_A) {
         if (t->type >= 0) {
-            if (t->lvl + 1 < TW_MAXLVL && g->gold >= tower_cost(t->type, t->lvl + 1)) {
+            int damaged = t->hp < TOWER_HP[t->lvl] - 0.01f;
+            if (t->lvl + 1 >= TW_MAXLVL && damaged && g->gold >= tower_repair_cost(t)) {
+                g->gold -= tower_repair_cost(t);
+                t->hp = TOWER_HP[t->lvl];
+                sparks(g, tx, th + 0.6f, tz, 12, 0xA0FFA0FF, 2.0f);
+                ring(g, tx, th + 0.03f, tz, 0.2f, 0.9f, 0.4f, 0x90FF90C0);
+                snd(g, SFX_BUILD, 150, tx);
+            } else if (t->lvl + 1 < TW_MAXLVL && g->gold >= tower_cost(t->type, t->lvl + 1)) {
                 int c = tower_cost(t->type, t->lvl + 1);
-                g->gold -= c; t->spent += (float)c; t->lvl++; t->built = 0.35f;
+                g->gold -= c; t->spent += (float)c; t->lvl++; t->built = 0.35f; t->hp = TOWER_HP[t->lvl];   /* upgrading also repairs */
                 sparks(g, tx, th + 0.6f, tz, 18, TOWERS[t->type].glow, 2.4f);
                 ring(g, tx, th + 0.03f, tz, 0.2f, 1.0f, 0.45f, TOWERS[t->type].glow);
                 flight(g, tx, th + 1.0f, tz, TOWERS[t->type].glow, 1.5f, 2.5f, 0.4f);
@@ -1007,7 +1124,7 @@ static void play_input(Game *g, const Input *in, float dt)
             int c = tower_cost(g->sel, 0);
             g->gold -= c;
             memset(t, 0, sizeof *t);
-            t->type = (int8_t)g->sel; t->spent = (float)c; t->target = -1; t->ang = -1.5708f;
+            t->type = (int8_t)g->sel; t->spent = (float)c; t->target = -1; t->ang = -1.5708f; t->hp = TOWER_HP[0];
             debris(g, tx, th + 0.2f, tz, 6, 0x8C8C9CFF, 0.1f);
             ring(g, tx, th + 0.03f, tz, 0.2f, 0.9f, 0.4f, 0xFFFFFFA0);
             smoke(g, tx, th + 0.1f, tz, 4, 0.3f, 0x60607080);
@@ -1076,12 +1193,13 @@ void game_update(Game *g, const Input *in, float dt)
         update_enemies(g, dt);
         break;
     case ST_PAUSE:
-        if (in->pressed & BTN_UP) { g->menu = (g->menu + 3) % 4; snd(g, SFX_MOVE, 128, FIRE_X); }
-        if (in->pressed & BTN_DOWN) { g->menu = (g->menu + 1) % 4; snd(g, SFX_MOVE, 128, FIRE_X); }
+        if (in->pressed & BTN_UP) { g->menu = (g->menu + 4) % 5; snd(g, SFX_MOVE, 128, FIRE_X); }
+        if (in->pressed & BTN_DOWN) { g->menu = (g->menu + 1) % 5; snd(g, SFX_MOVE, 128, FIRE_X); }
         if ((in->pressed & BTN_PLUS) || ((in->pressed & BTN_A) && g->menu == 0)) { g->state = ST_PLAY; snd(g, SFX_PAUSE, 150, FIRE_X); }
-        else if ((in->pressed & BTN_A) && g->menu == 1) { g->mute = !g->mute; snd(g, SFX_SELECT, 136, FIRE_X); }
-        else if ((in->pressed & BTN_A) && g->menu == 2) { new_game(g); snd(g, SFX_START, 128, FIRE_X); }
-        else if ((in->pressed & BTN_A) && g->menu == 3) { game_set_level(g, g->level); snd(g, SFX_PAUSE, 128, FIRE_X); }
+        else if ((in->pressed & BTN_A) && g->menu == 1) { g->music_off = !g->music_off; snd(g, SFX_SELECT, 136, FIRE_X); }
+        else if ((in->pressed & BTN_A) && g->menu == 2) { g->mute = !g->mute; snd(g, SFX_SELECT, 136, FIRE_X); }
+        else if ((in->pressed & BTN_A) && g->menu == 3) { new_game(g); snd(g, SFX_START, 128, FIRE_X); }
+        else if ((in->pressed & BTN_A) && g->menu == 4) { game_set_level(g, g->level); snd(g, SFX_PAUSE, 128, FIRE_X); }
         break;
     case ST_WIN: case ST_LOSE:
         g->end_t += dt;

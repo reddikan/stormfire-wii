@@ -14,7 +14,7 @@
 #define MH 13
 
 /* tile kinds */
-enum { TL_PATH, TL_WALL, TL_BLOCK, TL_LAWN, TL_TREE, TL_FIRE };
+enum { TL_PATH, TL_WALL, TL_BLOCK, TL_LAWN, TL_TREE, TL_FIRE, TL_GRAVE };
 /* block colours (TL_BLOCK) */
 enum { BC_RED, BC_ORANGE, BC_YELLOW, BC_GREEN, BC_MINT, BC_BLUE, BC_PURPLE, BC_CYAN, BC_COUNT };
 
@@ -43,11 +43,14 @@ typedef struct {
     uint8_t lvl;            /* 0..2 */
     float cd, ang, recoil, anim, built, spent, pulse;
     int   target;
+    float hp, hurt_t;       /* level 3 enemies can smash towers */
 } Tower;
+extern const float TOWER_HP[TW_MAXLVL];
 
 /* enemies */
 enum { EN_CRAWLER, EN_GRUNT, EN_BRUTE, EN_WISP, EN_GOLEM,                    /* level 1 */
        EN_BEETLE, EN_SLIME, EN_SLIMELET, EN_FOX, EN_CROW, EN_PUMPKIN, EN_GOURD,  /* level 2 */
+       EN_ZOMBIE, EN_GHOST, EN_SKELETON, EN_BAT, EN_BREAKER, EN_GHOULKING,       /* level 3 */
        EN_TYPES };
 typedef struct {
     const char *name;
@@ -57,6 +60,9 @@ typedef struct {
     int   boss;             /* gets the big health bar, resists slowing */
     int   split_type, split_n;   /* spawns these where it dies (-1 = none) */
     uint32_t color;         /* debris colour */
+    float smash, reach, smash_cd;    /* damage to a tower per blow, how far it reaches, seconds between blows */
+    int   summon_type, summon_n;     /* drops these as it walks (-1 = none) ... */
+    float summon_every;              /* ... this often */
 } EnemyDef;
 extern const EnemyDef ENEMIES[EN_TYPES];
 
@@ -75,6 +81,13 @@ typedef struct {
     float spawn_t;          /* pumpkin king: until it drops the next gourds */
     float armor_t;          /* flashes when a hit bounces off the armour */
     float inv_t;            /* just split off a parent: can't be hurt yet */
+    float smash_t;          /* until it can swing at a tower again */
+    float act_t;            /* > 0 while swinging (standing still) */
+    int8_t act_c, act_r;    /* the tower being smashed */
+    uint8_t act_hit;        /* the blow has landed this swing */
+    uint8_t revived;        /* skeleton: already got back up once */
+    float down_t;           /* skeleton: lying in a heap, about to reassemble */
+    int   step_n;           /* big walkers: footstep counter (screen shake) */
 } Enemy;
 
 /* projectiles */
@@ -129,7 +142,7 @@ typedef struct { uint8_t type, count, gate; float delay, gap; } Group;
 typedef struct { int n, gates; float hpmul; Group g[MAX_GROUPS]; } WaveDef;   /* gates: how many gates this wave uses */
 
 #define NUM_GATES 6
-enum { ENV_STORM, ENV_AUTUMN };
+enum { ENV_STORM, ENV_AUTUMN, ENV_HALLOW };
 typedef struct {
     const char *name;               /* shown on the title screen */
     const char *boss_line;          /* last-wave banner */
@@ -170,8 +183,9 @@ struct Game {
     float rep_t; uint32_t rep_dir;
     float stick_t;
     float gold_flash, fire_flash, err_t, sel_t;
-    int   menu;             /* pause menu item: 0 resume, 1 sound, 2 restart, 3 quit to title */
+    int   menu;             /* pause menu item: 0 resume, 1 music, 2 sound, 3 restart, 4 quit to title */
     int   mute;             /* sound effects off */
+    int   music_off;        /* background music off */
 
     /* waves */
     int   wave;             /* waves started so far (1-based display) */
@@ -224,6 +238,7 @@ void  game_set_level(Game *g, int level);   /* switch level (title screen backdr
 int   tower_cost(int type, int lvl);        /* cost to reach lvl (0 = build) */
 float tower_range(const Tower *t);
 int   tower_sell_value(const Tower *t);
+int   tower_repair_cost(const Tower *t);
 int   can_build(const Game *g, int cx, int cz);
 
 #endif

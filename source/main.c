@@ -5,7 +5,8 @@
  *           shaded triangles with normal and additive blending, 60 fps, 16:9
  *           anamorphic (or letterboxed inside 4:3 - press MINUS)
  *   input : Wii Classic Controller (plugged into Wii Remote 1): buttons + left stick
- *   audio : synthesized effects played through ASND, pitch-shifted and panned per event
+ *   audio : synthesized effects played through ASND, pitch-shifted and panned per event;
+ *           each level's music loops forever on voice 0 (which ASND hands out last)
  *
  * Everything game-related lives in the platform-independent C files.
  */
@@ -21,6 +22,7 @@
 #include <asndlib.h>
 
 #include "game.h"
+#include "music.h"
 #include "gfx.h"
 
 #define FIFO_SIZE (512 * 1024)
@@ -207,10 +209,12 @@ static u32 read_input(Input *in)
 /* ------------------------------------------------------------------ */
 /* audio                                                               */
 /* ------------------------------------------------------------------ */
+#define MUSIC_VOICE 0
+
 static void play_sfx(int id, int pitch, float pan)
 {
     s32 v = ASND_GetFirstUnusedVoice();
-    if (v < 0) return;      /* all voices busy: skip this one */
+    if (v < 0 || v == MUSIC_VOICE) return;      /* all voices busy (voice 0 is the music) */
     int vol = audio_volume(id);
     int vl = (int)((float)vol * (pan > 0 ? 1.0f - pan * 0.7f : 1.0f));
     int vr = (int)((float)vol * (pan < 0 ? 1.0f + pan * 0.7f : 1.0f));
@@ -239,6 +243,9 @@ int main(int argc, char **argv)
     game_init(game);                           /* also synthesizes the sound effects */
     for (int id = 0; id < SFX_COUNT; id++)     /* ASND reads samples by DMA: flush the cache */
         DCFlushRange((void *)audio_data(id), (u32)audio_len(id) * 2);
+    for (int t = 0; t < MUS_TRACKS; t++)
+        DCFlushRange((void *)music_data(t), (u32)music_len(t) * 2);
+    int playing = -1;
 
     const float dt = 1.0f / 60.0f;              /* the game simulates in fixed 1/60 s steps */
     u32 prev = 0;
@@ -271,6 +278,15 @@ int main(int argc, char **argv)
         int id, pitch;
         float pan;
         while ((id = game_pop_sound(game, &pitch, &pan)) >= 0) play_sfx(id, pitch, pan);
+
+        int want = game_music(game);           /* switch the music loop when the level (or the setting) changes */
+        if (want != playing) {
+            ASND_StopVoice(MUSIC_VOICE);
+            if (want >= 0)
+                ASND_SetInfiniteVoice(MUSIC_VOICE, VOICE_MONO_16BIT, MUS_RATE, 0, (void *)music_data(want),
+                                      music_len(want) * 2, music_volume(want), music_volume(want));
+            playing = want;
+        }
 
         game_render(game);
         draw_list();

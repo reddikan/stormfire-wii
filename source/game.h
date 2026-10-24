@@ -44,5 +44,7 @@ void game_render(const Game *g);                 /* fills the gfx triangle list 
 int  game_pop_sound(Game *g, int *pitch, float *pan);
 /* how many simulation steps to run this frame (1, or 2 while fast-forwarding) */
 int  game_speed(const Game *g);
+/* background music track the game wants right now (music.h), or -1 for silence */
+int  game_music(const Game *g);
 
 #endif

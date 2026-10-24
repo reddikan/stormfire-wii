@@ -19,10 +19,12 @@ static float flat_l[3];
 #define RC_MAXV 60000
 #define RC_MAXP 6000
 #define RC_SLOTS 32
-typedef struct { float x, y, r, g, b, f; uint16_t li; uint8_t a, pad; } CVtx;
+typedef struct { float x, y, r, g, b, f, sw; uint16_t li; uint8_t a, pad; } CVtx;   /* sw: sway in pixels */
 static CVtx  rcv[RC_MAXV];
 static float rcp[RC_MAXP][3];          /* light sample points */
 static float rcl[RC_MAXP][3];          /* their light this frame */
+static float rcs[RC_MAXP];             /* their sway this frame (-1..1, times the wind) */
+static float sw_amp, sw_y0, sw_y1 = 1;  /* sway being recorded: world units at the top, from y0 to y1 */
 static int   rc_np, rc_cur_slot;
 static int   rc_start[RC_SLOTS], rc_count[RC_SLOTS];
 static int   rc_flat_idx = -1;
@@ -58,19 +60,37 @@ void rc_begin(void)
 void rc_slot(int slot) { rc_cur_slot = slot; rc_start[slot] = rc_verts; rc_count[slot] = 0; }
 void rc_end(void) { rc_recording = 0; }
 
-static void rc_vert(float sx, float sy, uint32_t c, float f, int li)
+void rc_sway(float amp, float y0, float y1) { sw_amp = amp; sw_y0 = y0; sw_y1 = y1 > y0 + 0.01f ? y1 : y0 + 0.01f; }
+int  rc_last_point(void) { return rc_flat_idx; }
+float rc_sway_of(int li) { return (li >= 0 && li < rc_np) ? rcs[li] : 0.0f; }
+
+static float sway_px(float x, float y, float z)
+{
+    if (sw_amp <= 0) return 0;
+    float u = (y - sw_y0) / (sw_y1 - sw_y0);
+    if (u <= 0) return 0;
+    if (u > 1) u = 1;
+    (void)x;
+    return sw_amp * u * u * proj_scale(y, z);
+}
+
+static void rc_vert(float sx, float sy, uint32_t c, float f, int li, float sw)
 {
     if (rc_verts >= RC_MAXV || rc_cur_slot < 0) return;
     CVtx *v = &rcv[rc_verts++];
     v->x = sx; v->y = sy;
     v->r = (float)(c >> 24); v->g = (float)((c >> 16) & 255); v->b = (float)((c >> 8) & 255); v->a = (uint8_t)(c & 255);
-    v->f = f; v->li = (uint16_t)li;
+    v->f = f; v->li = (uint16_t)li; v->sw = sw;
     rc_count[rc_cur_slot]++;
 }
 
-void rc_relight(void)
+void rc_relight(float t, float wind)
 {
-    for (int i = 0; i < rc_np; i++) lt_at(rcp[i][0], rcp[i][1], rcp[i][2], rcl[i]);
+    for (int i = 0; i < rc_np; i++) {
+        lt_at(rcp[i][0], rcp[i][1], rcp[i][2], rcl[i]);
+        float ph = (float)i;
+        rcs[i] = wind * (0.65f * sinf(t * 1.1f + ph * 1.7f) + 0.35f * sinf(t * 2.3f + ph * 0.9f));
+    }
 }
 
 void rc_draw(int slot, float shx, float shy)
@@ -88,7 +108,7 @@ void rc_draw(int slot, float shx, float shy)
         if (mb > 1.0f) b += (mb - 1.0f) * 40.0f;
         int ir = (int)r, ig = (int)g, ib = (int)b;
         if (ir > 255) ir = 255; if (ig > 255) ig = 255; if (ib > 255) ib = 255;
-        o->x = v->x + shx; o->y = v->y + shy;
+        o->x = v->x + shx + v->sw * rcs[v->li]; o->y = v->y + shy;
         o->c = ((uint32_t)ir << 24) | ((uint32_t)ig << 16) | ((uint32_t)ib << 8) | v->a;
     }
     gfx_nv += n;
@@ -290,12 +310,14 @@ void r_face(int n, const float (*p)[3], float nx, float ny, float nz, uint32_t c
     float ff = r_unlit ? 1.0f : face_f(nx, ny, nz);
     if (rc_recording) {
         int li[8];
+        float sw[8];
         for (int i = 0; i < n; i++) {
             proj(p[i][0], p[i][1], p[i][2], &sx[i], &sy[i]);
             li[i] = flat_on ? rc_flat_idx : rc_point(p[i][0], p[i][1], p[i][2], 1);
+            sw[i] = sway_px(p[i][0], p[i][1], p[i][2]);
         }
         for (int i = 1; i + 1 < n; i++) {
-            rc_vert(sx[0], sy[0], c, ff, li[0]); rc_vert(sx[i], sy[i], c, ff, li[i]); rc_vert(sx[i + 1], sy[i + 1], c, ff, li[i + 1]);
+            rc_vert(sx[0], sy[0], c, ff, li[0], sw[0]); rc_vert(sx[i], sy[i], c, ff, li[i], sw[i]); rc_vert(sx[i + 1], sy[i + 1], c, ff, li[i + 1], sw[i + 1]);
         }
         return;
     }
@@ -375,6 +397,19 @@ void r_beam(float x, float y, float z, float dx, float dy, float dz, float len, 
     }
     /* the hexa index layout wants: bit1 = +S, bit2 = +U, bit4 = +F */
     hexa((const float (*)[3])k, S, U, F, c, c, 0);
+}
+
+void r_stick(float x0, float y0, float z0, float x1, float y1, float z1, float w0, float w1, uint32_t c)
+{
+    float dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+    float vx = cam.camx - x0, vy = cam.camy - y0, vz = cam.camz - z0;     /* towards the camera */
+    float sx = dy * vz - dz * vy, sy = dz * vx - dx * vz, sz = dx * vy - dy * vx;
+    float sl = sqrtf(sx * sx + sy * sy + sz * sz);
+    if (sl < 1e-6f) return;
+    sx /= sl; sy /= sl; sz /= sl;
+    float p[4][3] = { {x0 - sx * w0 * 0.5f, y0 - sy * w0 * 0.5f, z0 - sz * w0 * 0.5f}, {x0 + sx * w0 * 0.5f, y0 + sy * w0 * 0.5f, z0 + sz * w0 * 0.5f},
+                      {x1 + sx * w1 * 0.5f, y1 + sy * w1 * 0.5f, z1 + sz * w1 * 0.5f}, {x1 - sx * w1 * 0.5f, y1 - sy * w1 * 0.5f, z1 - sz * w1 * 0.5f} };
+    r_face(4, (const float (*)[3])p, vx, vy + 0.3f, vz, c);              /* lit like a mostly-front face */
 }
 
 void r_prism(float x, float y0, float z, float rb, float rt, float y1, int n, float rot, uint32_t top, uint32_t side)
@@ -458,7 +493,7 @@ void r_ground_quad(float x0, float z0, float x1, float z1, uint32_t c, const flo
         int li[4];
         for (int i = 0; i < 4; i++) li[i] = rc_point(p[i][0], 0, p[i][2], 1);
         static const int T6[6] = { 0, 1, 2, 0, 2, 3 };
-        for (int k = 0; k < 6; k++) rc_vert(sx[T6[k]], sy[T6[k]], c, ao[T6[k]], li[T6[k]]);
+        for (int k = 0; k < 6; k++) rc_vert(sx[T6[k]], sy[T6[k]], c, ao[T6[k]], li[T6[k]], 0);
         return;
     }
     uint32_t cc[4];
