@@ -6,9 +6,9 @@ A campfire burns in the middle of a maze in the woods, and enemies march in from
 
 ## Levels
 
-Pick a level on the title screen with left / right. Winning a level takes you straight to the next one.
+Pick a level on the title screen with left / right. Winning a level takes you straight to the next one. Every level has 20 waves, the last one bringing its boss.
 
-1. **The Storm** - a night of rain and lightning in a brick maze. 12 waves, ending with the Storm Golem.
+1. **The Storm** - a night of rain and lightning in a brick maze, ending with the Storm Golem.
 2. **Autumn Gold** - golden hour in an autumn forest: low sunbeams through red and orange trees, fog, falling leaves and long shadows. A ring road circles the fire with only two ways in. Tougher enemies:
    - **Beetle** - armoured; small hits bounce off (mortars and tesla do best)
    - **Slime** - splits into two slimelets when it pops
@@ -29,17 +29,25 @@ Pick a level on the title screen with left / right. Winning a level takes you st
    - **Tinker** - a little repair-bot that heals everything nearby every few seconds - pick it off first
    - **Sentinel** - a stone-and-brass guardian that pounds on towers
    - **Architect** - the boss: armoured, builds automatons as it walks, and its shockwave jams every tower nearby for a few seconds
-5. **Pirate Storm** - the epic one: a much bigger map (27 x 17), all at sea in a storm, with rain, lightning and wind gusts that tear across the water. Build on wooden docks, cargo crates and sandbars; the pirates sail up the open-water lanes from eight directions to plunder a treasure chest on an island in the middle. The whole world rides the swell - everything rolls and bobs with the sea - and lantern buoys mark the way in. 15 waves:
+5. **Pirate Storm** - the epic one: a much bigger map (27 x 17), all at sea in a storm, with rain, lightning and wind gusts that tear across the water. Build on wooden docks, cargo crates and sandbars; the pirates sail up the open-water lanes from eight directions to plunder a treasure chest on an island in the middle. The whole world rides the swell - everything rolls and bobs with the sea - and lantern buoys mark the way in:
    - **Rowboat** - armoured little boats full of rowing pirates
    - **Shark** - fast, and dives under the surface (out of reach) every few seconds
    - **Skull Pirate** - a skeleton buccaneer on a barrel; knock it into the sea and it climbs back aboard once
    - **Parrot** - flies straight at the treasure
    - **Pirate Ship** - big and armoured; its cannon broadsides jam every tower alongside for a moment
    - **Kraken** - the boss: a vast head and eight writhing tentacles; it dives out of reach now and then and calls up sharks as it comes
+6. **88 MPH** - a time-travel town square at night: neon-lit streets, a clock tower stopped at 10:04, street lamps, and the time machine parked in the middle - a stainless gull-wing car on hover pods with its flux capacitor pulsing. Visitors from the future arrive through time portals at eight gates in a white flash, leaving twin trails of fire on the road. Every so often lightning strikes the clock tower - **1.21 gigawatts** - and arcs out to zap the enemies. Every 88 kills the flux capacitor surges (**88 MPH!**): a time shockwave slows and stings everything on the map and pays a bonus. And it all plays like a pinball machine - bumpers, flippers, dings, a plunger launch for each wave, a jackpot when you clear one, TILT when they reach the car, a score and combo multiplier, and a dot-matrix display calling out the big moments. The hardest level:
+   - **Hoverboarder** - quick, weaving along the street on a pink hoverboard
+   - **Drone** - a camera drone flying straight at the car
+   - **Servo Bot** - a heavily armoured chrome robot
+   - **Holo-Shark** - a holographic shark that keeps glitching out of reach
+   - **Paradox** - two moments of the same figure at once; destroy it and it splits into two echoes
+   - **Hover Car** - big and armoured; its sonic boom jams the towers around it
+   - **Time Train** - the boss: a flying steam locomotive that time-jumps ahead in a flash of fire, sends out drones, and splits into paradoxes when it falls
 
-The bigger map is drawn smaller to fit, so use **L / R** to zoom in and out - the view follows the cursor. The pirates shout at you like an old arcade cabinet: "Arr, matey!", "Avast, ye!", "Walk the plank!", "Shiver me timbers!" when the Kraken comes, "Yo ho ho!" and a "Har har har!" when they get their hands on your gold.
+The bigger maps (levels 5 and 6) are drawn smaller to fit, so use **L / R** to zoom in and out - the view follows the cursor.
 
-Each level has its own music (dreary for the storm, light and fresh for autumn, fun and spooky for Halloween, slow and mysterious for the island, an epic stormy sea shanty for the pirates). Battles shake the screen with a little depth parallax (the near side of the board moves more than the far side), big hits punch the view, and every weapon has extra flourishes: blaster muzzle flashes and flying casings, mortar landing markers, fireballs and scorch marks, frost splinters and frosted-over enemies, and tesla coils that visibly charge up before they fire.
+Each level has its own music (dreary for the storm, light and fresh for autumn, fun and spooky for Halloween, slow and mysterious for the island, an epic stormy sea shanty for the pirates, driving 80s synthwave for 88 MPH). Battles shake the screen with a little depth parallax (the near side of the board moves more than the far side), big hits punch the view, and every weapon has extra flourishes: blaster muzzle flashes and flying casings, mortar landing markers, fireballs and scorch marks, frost splinters and frosted-over enemies, and tesla coils that visibly charge up before they fire.
 
 ## Controls (Classic Controller)
 
@@ -82,7 +90,6 @@ Locally with devkitPro installed: `make`.
 - Lighting comes from a coarse 3D light grid rebuilt each frame from the campfire, torches, towers, explosions, and the moon and lightning (level 1) or dappled low sunlight (level 2).
 - The scenery is projected once and only re-lit each frame, which keeps the Wii's CPU well inside 60 fps.
 - The sea swell on level 5 is part of the view transform: a slow roll and bob folded into the 2D affine every vertex already goes through, plus one table lookup per vertex for a wave rolling across the screen.
-- The pirate voices come from a tiny formant speech synthesizer (a buzzing glottal pulse through formant resonators, hiss for the fricatives, then crunched like an arcade speech chip) - no recordings.
 - The CPU builds the next frame while the GPU is still drawing the last one.
-- Every sound and all five music loops are composed and synthesized at start-up (a small offline synth with plucked strings, FM bells, a theremin, a fiddle, an accordion, brass, timpani and reverb). No asset files.
+- Every sound and all six music loops are composed and synthesized at start-up (a small offline synth with plucked strings, FM bells, a theremin, a fiddle, an accordion, brass, timpani and reverb). No asset files.
 - Trees sway by storing a sway weight with each cached vertex, so the whole forest moves for the cost of one sine per tree.

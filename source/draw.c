@@ -24,10 +24,15 @@ static float tw_charge;      /* tower being drawn: how close it is to firing (0.
 #define HALLOW (G->lv->env == ENV_HALLOW)
 #define ISLAND (G->lv->env == ENV_ISLAND)
 #define PIRATE (G->lv->env == ENV_PIRATE)
+#define FUTURE (G->lv->env == ENV_FUTURE)
+static void mortar_top(float x0, float z0, float x1, float z1, float y, uint32_t c);
+static void wtri(float ax, float ay, float az, float bx, float by, float bz, float cx, float cy, float cz, uint32_t c);
+static float wk_x, wk_z, wk_s = 1.0f;       /* the model scale for wtri (r_scale does not reach these) */
+static void mortar_front(float x0, float y0, float x1, float y1, float z, uint32_t c);
 
 /* level 4 props that move: orrery rings, rune glows, gears on walls; and sparkles on the sea */
-#define MAX_PROP 40
-enum { PR_ORRERY, PR_RUNE, PR_GEAR, PR_BUOY, PR_BARREL };
+#define MAX_PROP 64
+enum { PR_ORRERY, PR_RUNE, PR_GEAR, PR_BUOY, PR_BARREL, PR_CLOCK, PR_LAMP, PR_PORTAL, PR_NEON };
 typedef struct { uint8_t kind, row; float x, z, y, ph; } Prop;
 static Prop prop[MAX_PROP];
 static int nprop;
@@ -117,6 +122,24 @@ static void build_lights(void)
     lt_begin();
     float fv = G->fire_vis, fl = flicker(0.0f);
     float lk = AUTUMN ? 0.45f : (HALLOW ? 0.85f : (ISLAND ? 0.6f : 1.0f));   /* point lights matter less in daylight */
+    if (FUTURE) {
+        for (int i = 0; i < nprop; i++) {
+            const Prop *p = &prop[i];
+            if (p->kind == PR_LAMP) { float k = flicker(p->ph) * 0.9f; lt_add(p->x, 1.2f, p->z, 0.75f * k, 0.55f * k, 0.3f * k, 2.0f); }
+            else if (p->kind == PR_PORTAL) { float k = 0.7f + 0.3f * sinf(T * 4.0f + p->ph); lt_add(p->x, 0.6f, p->z, 0.25f * k, 0.5f * k, 0.9f * k, 2.2f); }
+            else if (p->kind == PR_NEON) {
+                uint32_t c = BLOCK_COL[(int)p->y];
+                float k = fmodf(T * 0.7f + p->ph, 7.0f) < 0.25f ? 0.15f : 0.6f;
+                lt_add(p->x, 0.9f, p->z + 0.3f, (float)(c >> 24) / 255.0f * k, (float)((c >> 16) & 255) / 255.0f * k, (float)((c >> 8) & 255) / 255.0f * k, 1.8f);
+            } else if (p->kind == PR_CLOCK && G->giga_fx > 0) {
+                float k = clampf(G->giga_fx / 2.0f, 0, 1);
+                lt_add(p->x, 2.4f, p->z, 1.2f * k, 1.4f * k, 2.0f * k, 4.5f);
+            }
+        }
+        float fv = G->fire_vis, sg = clampf(G->surge_t, 0, 1.6f);
+        float k = (0.55f + 0.15f * sinf(T * 9.0f)) * fv + sg;
+        lt_add(FIRE_X - 0.4f, 0.9f, FIRE_Z, 0.45f * k, 0.65f * k, 1.0f * k, 2.4f + 2.0f * sg);   /* the flux capacitor */
+    }
     if (PIRATE) {
         for (int i = 0; i < nprop; i++)
             if (prop[i].kind == PR_BUOY) {
@@ -141,7 +164,8 @@ static void build_lights(void)
         }
         for (int i = 0; i < njack; i++) lt_add(jack[i].x, 0.25f, jack[i].z, 0.5f, 0.26f, 0.06f, 1.4f);
     }
-    if (fv > 0.02f && PIRATE)                                 /* the treasure's golden glow */
+    if (FUTURE) { /* the time machine lights itself (above) */ }
+    else if (fv > 0.02f && PIRATE)                                 /* the treasure's golden glow */
         lt_add(FIRE_X, 0.9f, FIRE_Z + 0.1f, 1.2f * fv, 0.95f * fv, 0.35f * fv, 2.2f + 2.0f * fv);
     else if (fv > 0.02f)
         lt_add(FIRE_X, 0.9f, FIRE_Z, 1.35f * fv * fl * lk, 0.62f * fv * fl * lk, 0.24f * fv * fl * lk, 2.6f + 2.4f * fv);
@@ -181,6 +205,9 @@ static void build_lights(void)
         if (e->type == EN_GHOULKING) lt_add(e->x, 1.2f, e->z, 0.2f, 0.7f, 0.25f, 2.6f);
         if (e->type == EN_ARCHITECT) lt_add(e->x, 1.0f, e->z, 0.2f, 0.45f, 0.7f, 2.6f);
         if (e->type == EN_GHOST && e->dash_t <= 0) lt_add(e->x, e->y, e->z, 0.15f, 0.22f, 0.4f, 1.3f);
+        if (e->type == EN_HOVERCAR) lt_add(e->x + cosf(e->ang) * 0.7f, 0.5f, e->z + sinf(e->ang) * 0.7f, 0.3f, 0.6f, 0.7f, 1.8f);
+        if (e->type == EN_TIMETRAIN && e->dash_t <= 0) lt_add(e->x, 0.8f, e->z, 0.9f, 0.5f, 0.2f, 2.6f);
+        if (e->type == EN_HOLOSHARK && e->dash_t <= 0) lt_add(e->x, 0.5f, e->z, 0.1f, 0.3f, 0.5f, 1.4f);
         if (e->type == EN_SHIP) lt_add(e->x - cosf(e->ang) * 0.75f, 0.5f, e->z - sinf(e->ang) * 0.75f, 0.7f, 0.42f, 0.15f, 1.8f);
         if (e->type == EN_KRAKEN && e->dash_t <= 0) lt_add(e->x, 0.8f, e->z, 0.6f, 0.45f, 0.15f, 2.4f);
     }
@@ -212,6 +239,15 @@ static uint32_t ground_col(int c, int r)
             base = near ? 0x3E6E84FF : 0x2C5070FF;     /* shallows, then deeper water */
             v = 0.97f + 0.06f * hf(c, r, 1);
         }
+        return scale_rgb(base, v);
+    }
+    if (FUTURE) {                                  /* a town square at night: asphalt streets, pavement, a little park */
+        if (k == TL_PATH || (!in_map(c, r) && outside_lane(c, r))) base = ((c + r) & 1) ? 0x3E3E48FF : 0x3A3A44FF;
+        else if (k == TL_FIRE) base = ((c + r) & 1) ? 0x9898A2FF : 0x88889AFF;
+        else if (k == TL_LAWN) base = ((c + r) & 1) ? 0x3E6E40FF : 0x3A683CFF;
+        else if (k == TL_GRAVE) base = 0x80808AFF;
+        else if (in_map(c, r)) base = 0x6A6A74FF;
+        else base = ((c + r) & 1) ? 0x30303AFF : 0x2C2C36FF;
         return scale_rgb(base, v);
     }
     if (PIRATE) {                                  /* the open sea in a storm; pale sandbars; the treasure island */
@@ -493,6 +529,79 @@ static void draw_island_static(void)
     }
 }
 
+/* level 6: a building (shop fronts round the square, the town beyond); near the camera they stay low */
+static void draw_building(int c, int r)
+{
+    float x0 = (float)c + 0.04f, x1 = (float)c + 0.96f, z0 = (float)r + 0.04f, z1 = (float)r + 0.96f;
+    int nearcam = r >= MH - 1;
+    float h = nearcam ? 0.3f + 0.15f * hf(c, r, 30) : 0.7f + 1.2f * hf(c, r, 31) + (r < 0 ? 0.4f * (float)(-r) * hf(c, r, 32) : 0.0f);
+    if (!on_screen((float)c + 0.5f, h, (float)r + 0.5f, 90.0f)) return;
+    static const uint32_t BC[5] = { 0x6A4C46FF, 0x847462FF, 0x5A5A66FF, 0x426068FF, 0x6E5A7AFF };
+    uint32_t col = BC[(int)(hf(c, r, 33) * 4.99f)], side = scale_rgb(col, 0.78f);
+    r_box(x0, 0, z0, x1, h, z1, scale_rgb(col, 0.7f), side, 0);
+    r_light_model((float)c + 0.5f, h * 0.5f, (float)r + 1.0f);
+    int nearmap = c >= -2 && c <= MW + 1 && r >= -2 && r <= MH + 1;
+    if (nearmap && !nearcam) {                       /* windows on the front, some lit */
+        int floors = (int)(h / 0.42f);
+        for (int f = 0; f < floors && f < 3; f++)
+            for (int k = 0; k < 2; k++) {
+                float wx = x0 + 0.16f + 0.4f * (float)k, wy = 0.18f + 0.42f * (float)f;
+                uint32_t wc = hf(c + k, r + f, 34) < 0.55f ? 0xF8DC90FF : 0x283040FF;
+                mortar_front(wx, wy, wx + 0.24f, wy + 0.22f, z1 + 0.004f, wc);
+            }
+    }
+    if (h > 0.5f) mortar_top(x0, z0, x1, z0 + 0.06f, h + 0.003f, scale_rgb(col, 0.5f));   /* parapet line */
+    r_light_off();
+}
+
+/* the clock tower (static part); its glowing face is drawn every frame */
+static void draw_clock_tower(int c, int r)
+{
+    float x = (float)c + 0.5f, z = (float)r + 0.5f;
+    r_light_model(x, 1.0f, z + 0.5f);
+    r_box(x - 0.46f, 0, z - 0.46f, x + 0.46f, 1.0f, z + 0.46f, 0x9A7A64FF, 0x7A5C4AFF, 0);
+    r_box(x - 0.36f, 1.0f, z - 0.36f, x + 0.36f, 2.0f, z + 0.36f, 0xC8C0B0FF, 0xA8A090FF, 0);
+    r_box(x - 0.42f, 1.95f, z - 0.42f, x + 0.42f, 2.05f, z + 0.42f, 0xD8D0C0FF, 0xB0A898FF, 0);
+    r_prism(x, 2.05f, z, 0.4f, 0.0f, 2.6f, 4, 0.785f, 0x405060FF, 0x304050FF);
+    r_prism(x, 2.55f, z, 0.025f, 0.01f, 2.85f, 4, 0, 0x606060FF, 0x505050FF);       /* lightning rod */
+    for (int k = 0; k < 3; k++) mortar_front(x - 0.3f + 0.22f * (float)k, 0.0f, x - 0.18f + 0.22f * (float)k, 0.6f, z + 0.464f, 0x3A2A22FF);   /* doors */
+    r_light_off();
+    if (nprop < MAX_PROP) { Prop *p = &prop[nprop++]; p->kind = PR_CLOCK; p->x = x; p->z = z; p->y = 1.5f; p->ph = 0; p->row = (uint8_t)(r - ROW_MIN); }
+}
+
+static void draw_lamp_post(int c, int r)
+{
+    float x = (float)c + 0.5f, z = (float)r + 0.5f;
+    r_light_model(x, 0.6f, z);
+    r_prism(x, 0, z, 0.1f, 0.08f, 0.08f, 6, 0, 0x404048FF, 0x303038FF);
+    r_prism(x, 0.08f, z, 0.035f, 0.03f, 1.15f, 6, 0, 0x404048FF, 0x303038FF);
+    r_light_off();
+    if (nprop < MAX_PROP) { Prop *p = &prop[nprop++]; p->kind = PR_LAMP; p->x = x; p->z = z; p->y = 1.2f; p->ph = hf(c, r, 9) * 6.28f; p->row = (uint8_t)(r - ROW_MIN); }
+}
+
+/* the plaza under the time machine, and the props that move: time portals at the gates, neon signs */
+static void build_future_ground(void)
+{
+    for (int i = 0; i < G->lv->ngates && nprop < MAX_PROP; i++) {
+        int gc = G->lv->gates[i][0], gr = G->lv->gates[i][1];
+        float ox = 0, oz = 0;
+        if (gr == 0) oz = -1; else if (gr == MH - 1) oz = 1; else if (gc == 0) ox = -1; else ox = 1;
+        Prop *p = &prop[nprop++];
+        p->kind = PR_PORTAL; p->x = (float)gc + 0.5f + ox * 1.7f; p->z = (float)gr + 0.5f + oz * 1.7f;
+        p->y = ox != 0 ? 1.0f : 0.0f;                        /* which way the road runs through it */
+        p->ph = (float)i * 1.3f;
+        int rr = (int)floorf(p->z); if (rr < ROW_MIN) rr = ROW_MIN; if (rr >= ROW_MAX) rr = ROW_MAX - 1;
+        p->row = (uint8_t)(rr - ROW_MIN);
+    }
+    /* neon signs on a few of the shop fronts along the top edge */
+    for (int c = 1; c < MW - 1 && nprop < MAX_PROP; c++) {
+        if (G->tile[0][c].kind != TL_TREE || hf(c, 0, 40) > 0.4f) continue;
+        Prop *p = &prop[nprop++];
+        p->kind = PR_NEON; p->x = (float)c + 0.5f; p->z = 0.97f; p->y = (float)(int)(hf(c, 0, 41) * 7.99f); p->ph = hf(c, 0, 42) * 10.0f;
+        p->row = (uint8_t)(0 - ROW_MIN);
+    }
+}
+
 static void build_autumn_ground(void)
 {
     /* leaf litter */
@@ -626,11 +735,33 @@ static void draw_storm_sea(void)
     gfx_blend(BL_ALPHA);
 }
 
+/* level 6: twin trails of fire burnt into the road, and blue glow under the time portals */
+static void draw_fire_trails(void)
+{
+    gfx_blend(BL_ADD);
+    for (int i = 0; i < MAX_TRAIL; i++) {
+        const Trail *t = &G->trail[i];
+        if (t->t >= t->life) continue;
+        float k = 1.0f - t->t / t->life, dx = t->x1 - t->x0, dz = t->z1 - t->z0, l = sqrtf(dx * dx + dz * dz) + 1e-4f;
+        float px = -dz / l * 0.17f, pz = dx / l * 0.17f;
+        for (int s2 = -1; s2 <= 1; s2 += 2) {
+            float ax = t->x0 + px * (float)s2, az = t->z0 + pz * (float)s2, bx = t->x1 + px * (float)s2, bz = t->z1 + pz * (float)s2;
+            float fl = 0.8f + 0.2f * sinf(T * 30.0f + (float)(i * 3 + s2));
+            r_glowline(ax, 0.02f, az, bx, 0.02f, bz, 9.0f, RGBA(255, 120, 30, (int)(150 * k * fl)));
+            r_line(ax, 0.025f, az, bx, 0.025f, bz, 2.2f, RGBA(255, 230, 140, (int)(255 * k)), RGBA(255, 160, 60, (int)(200 * k)));
+        }
+    }
+    for (int i = 0; i < nprop; i++)
+        if (prop[i].kind == PR_PORTAL) r_gdisc(prop[i].x, prop[i].z, 0.02f, 1.1f, 12, RGBA(90, 160, 255, 70), 0x4080FF00);
+    gfx_blend(BL_ALPHA);
+}
+
 static void draw_ground(void)
 {
     rc_draw(SLOT_GROUND, SHX, SHY);
     if (ISLAND) draw_island_water();
     if (PIRATE) draw_storm_sea();
+    if (FUTURE) draw_fire_trails();
     for (int i = 0; i < MAX_PT; i++) {                   /* mortar scorch marks, fading */
         const Part *p = &G->pt[i];
         if (p->life <= 0 || p->kind != PT_SCORCH) continue;
@@ -916,8 +1047,49 @@ static void draw_crate(int c, int r, const Tile *t)
     r_light_off();
 }
 
+/* level 6: a raised concrete sidewalk with paving seams and a neon strip along the kerb */
+static void draw_sidewalk(int c, int r, const Tile *t)
+{
+    float x0 = (float)c, z0 = (float)r, x1 = x0 + 1, z1 = z0 + 1, h = t->h;
+    int skip = 0;
+    if (solid(c - 1, r)) skip |= SK_LEFT;
+    if (solid(c + 1, r)) skip |= SK_RIGHT;
+    if (solid(c, r + 1)) skip |= SK_FRONT;
+    if (solid(c, r - 1)) skip |= SK_BACK;
+    float v = 0.92f + 0.12f * hf(c, r, 14);
+    r_box(x0, 0, z0, x1, h, z1, scale_rgb(0x9A9AA6FF, v), scale_rgb(0x74747EFF, v), skip);
+    r_light_model(x0 + 0.5f, h, z0 + 0.5f);
+    float y = h + 0.003f, w = 0.012f;
+    uint32_t line = 0x5E5E68FF;
+    mortar_top(x0 + 0.5f - w, z0, x0 + 0.5f + w, z1, y, line);
+    mortar_top(x0, z0 + 0.5f - w, x1, z0 + 0.5f + w, y, line);
+    /* neon kerb strip where it meets the street (cyan and magenta, alternating blocks) */
+    uint32_t neon = ((c / 2 + r / 2) & 1) ? 0x60F0FFFF : 0xFF60D0FF;
+    if (!solid(c, r + 1) && kind_at(c, r + 1) == TL_PATH) { mortar_front(x0, h * 0.45f, x1, h * 0.8f, z1 + 0.004f, neon); mortar_top(x0, z1 - 0.07f, x1, z1 - 0.02f, y + 0.001f, neon); }
+    if (!solid(c, r - 1) && kind_at(c, r - 1) == TL_PATH) mortar_top(x0, z0 + 0.02f, x1, z0 + 0.07f, y + 0.001f, neon);
+    if (!solid(c - 1, r) && kind_at(c - 1, r) == TL_PATH) mortar_top(x0 + 0.02f, z0, x0 + 0.07f, z1, y + 0.001f, neon);
+    if (!solid(c + 1, r) && kind_at(c + 1, r) == TL_PATH) mortar_top(x1 - 0.07f, z0, x1 - 0.02f, z1, y + 0.001f, neon);
+    r_light_off();
+}
+
+/* level 6: a gunmetal tech crate with a glowing coloured panel on top */
+static void draw_tech_crate(int c, int r, const Tile *t)
+{
+    float x0 = (float)c + 0.06f, z0 = (float)r + 0.06f, x1 = (float)c + 0.94f, z1 = (float)r + 0.94f, h = t->h;
+    uint32_t col = BLOCK_COL[t->color];
+    r_box(x0, 0, z0, x1, h, z1, 0x50545EFF, 0x3E424CFF, 0);
+    r_light_model((float)c + 0.5f, h, (float)r + 0.5f);
+    float y = h + 0.003f;
+    mortar_top(x0 + 0.12f, z0 + 0.12f, x1 - 0.12f, z1 - 0.12f, y, col_mix(col, 0xFFFFFFFF, 0.25f));
+    mortar_top(x0 + 0.2f, z0 + 0.2f, x1 - 0.2f, z1 - 0.2f, y + 0.001f, col);
+    mortar_front(x0 + 0.1f, h * 0.3f, x1 - 0.1f, h * 0.4f, z1 + 0.004f, col);
+    mortar_front(x0 + 0.1f, h * 0.55f, x0 + 0.3f, h * 0.75f, z1 + 0.004f, 0x202428FF);
+    r_light_off();
+}
+
 static void draw_wall(int c, int r, const Tile *t)
 {
+    if (FUTURE) { draw_sidewalk(c, r, t); return; }
     if (PIRATE) { draw_dock(c, r, t); return; }
     float x0 = (float)c, z0 = (float)r, x1 = x0 + 1, z1 = z0 + 1, h = t->h;
     int skip = 0;
@@ -973,6 +1145,7 @@ static void draw_torch(int c, int r, const Tile *t)
 static void draw_block(int c, int r, const Tile *t)
 {
     if (PIRATE) { draw_crate(c, r, t); return; }
+    if (FUTURE) { draw_tech_crate(c, r, t); return; }
     float x0 = (float)c + 0.03f, z0 = (float)r + 0.03f, x1 = (float)c + 0.97f, z1 = (float)r + 0.97f;
     uint32_t col = BLOCK_COL[t->color];
     uint32_t side = scale_rgb(col, 0.82f), top = col;
@@ -1043,6 +1216,95 @@ static void draw_treasure(void)
         }
     }
     gfx_blend(BL_ALPHA);
+}
+
+/* level 6: the time machine - a stainless gull-wing sports car on hover pods, gull-wing doors up, time circuit
+ * coils glowing along the back, and the flux capacitor pulsing in a Y */
+static void draw_delorean(void)
+{
+    float fv = G->fire_vis, sg = clampf(G->surge_t / 1.6f, 0, 1);
+    float x = FIRE_X, z = FIRE_Z + 0.05f, hy = 0.24f + 0.035f * sinf(T * 2.0f);
+    float flick = fv < 0.5f && sinf(T * 37.0f) > 0.6f ? 0.3f : 1.0f;          /* low on power: it splutters */
+    /* hover glow and the wheels folded flat underneath */
+    gfx_blend(BL_ADD);
+    r_gdisc(x, z, 0.012f, 1.5f, 16, RGBA(80, 150, 255, (int)(70 + 60 * sg)), 0x4080FF00);
+    gfx_blend(BL_ALPHA);
+    r_scale(x, 0, z, 1.22f);
+    wk_x = x; wk_z = z; wk_s = 1.22f;
+    r_light_model(x, hy + 0.3f, z + 0.6f);
+    for (int k = 0; k < 4; k++) {
+        float wx = x + ((k & 1) ? 0.58f : -0.58f), wz = z + ((k & 2) ? 0.36f : -0.36f);
+        r_prism(wx, hy - 0.06f, wz, 0.12f, 0.12f, hy - 0.01f, 10, 0, 0x202024FF, 0x18181CFF);
+    }
+    uint32_t steel = 0xE0E4EAFF, steel2 = 0xA8ACB4FF, glass = 0x202838FF, dark = 0x1C1C22FF;
+    /* a low wedge: the body, a tapered nose, the black stripe, a sloping bonnet up to the windscreen */
+    r_obox(x - 0.16f, hy, z, 0.78f, 0.4f, hy + 0.13f, 0, steel, steel2);
+    r_obox(x + 0.72f, hy, z, 0.2f, 0.34f, hy + 0.1f, 0, steel, steel2);
+    r_obox(x - 0.16f, hy + 0.055f, z, 0.785f, 0.405f, hy + 0.08f, 0, dark, dark);
+    r_obox(x - 0.5f, hy + 0.13f, z, 0.44f, 0.37f, hy + 0.21f, 0, steel, steel2);          /* rear deck */
+    {
+        float p[4][3] = { {x + 0.02f, hy + 0.21f, z - 0.37f}, {x + 0.02f, hy + 0.21f, z + 0.37f}, {x + 0.62f, hy + 0.13f, z + 0.38f}, {x + 0.62f, hy + 0.13f, z - 0.38f} };
+        r_face(4, (const float (*)[3])p, 0.13f, 1.0f, 0, steel);
+        float q[4][3] = { {x + 0.02f, hy + 0.13f, z + 0.4f}, {x + 0.62f, hy + 0.13f, z + 0.4f}, {x + 0.62f, hy + 0.13f, z + 0.38f}, {x + 0.02f, hy + 0.21f, z + 0.37f} };
+        r_face(4, (const float (*)[3])q, 0, 0, 1, steel2);
+    }
+    {   /* windscreen and the low cabin roof */
+        float p[4][3] = { {x + 0.02f, hy + 0.21f, z - 0.3f}, {x + 0.02f, hy + 0.21f, z + 0.3f}, {x - 0.16f, hy + 0.34f, z + 0.27f}, {x - 0.16f, hy + 0.34f, z - 0.27f} };
+        r_face(4, (const float (*)[3])p, 0.6f, 1.0f, 0, glass);
+    }
+    r_obox(x - 0.28f, hy + 0.21f, z, 0.12f, 0.27f, hy + 0.34f, 0, steel, glass);
+    for (int k = 0; k < 5; k++)                                                           /* rear louvres */
+        mortar_top(x - 0.9f + 0.08f * (float)k, z - 0.3f, x - 0.87f + 0.08f * (float)k, z + 0.3f, hy + 0.212f, dark);
+    r_prism(x - 0.76f, hy + 0.21f, z + 0.14f, 0.07f, 0.06f, hy + 0.33f, 8, 0, 0xF0F0F0FF, 0xD8D8DCFF);   /* the kitchen-appliance fusion reactor */
+    r_prism(x - 0.76f, hy + 0.33f, z + 0.14f, 0.06f, 0.0f, hy + 0.39f, 8, 0, 0xE0E0E4FF, 0xC8C8CCFF);
+    r_light_off();
+    /* gull-wing doors, swung up and breathing open a little */
+    float a = 1.1f + 0.1f * sinf(T * 0.8f);
+    for (int s2 = -1; s2 <= 1; s2 += 2) {
+        float hz = z + 0.27f * (float)s2, hyy = hy + 0.34f;
+        float ez = hz + cosf(a) * 0.3f * (float)s2, ey = hyy + sinf(a) * 0.3f;
+        uint32_t dc = lt_shade(s2 > 0 ? 0xB8BCC4FF : steel, x, ey, ez, 1.0f);
+        wtri(x - 0.36f, hyy, hz, x + 0.06f, hyy, hz, x + 0.06f, ey, ez, dc);
+        wtri(x - 0.36f, hyy, hz, x + 0.06f, ey, ez, x - 0.36f, ey, ez, dc);
+    }
+    gfx_blend(BL_ADD);
+    /* time circuit coils down the back */
+    float coil = (0.55f + 0.45f * sinf(T * 6.0f)) * flick * (0.5f + 0.5f * fv) + sg;
+    for (int s2 = -1; s2 <= 1; s2 += 2) {
+        r_glowline(x - 0.92f, hy + 0.19f, z + 0.38f * (float)s2, x - 0.4f, hy + 0.21f, z + 0.4f * (float)s2, 6.0f, RGBA(120, 190, 255, (int)(150 * fminf(coil, 1.0f))));
+        r_line(x - 0.92f, hy + 0.19f, z + 0.38f * (float)s2, x - 0.4f, hy + 0.21f, z + 0.4f * (float)s2, 1.6f, RGBA(220, 240, 255, (int)(255 * fminf(coil, 1.0f))), RGBA(220, 240, 255, (int)(255 * fminf(coil, 1.0f))));
+    }
+    /* the flux capacitor: three arms of light meeting in a Y, pulses racing inwards */
+    float fx = x - 0.5f, fy = hy + 0.22f, fz2 = z - 0.08f, L = 0.17f;
+    float fk = (0.6f + 0.4f * sinf(T * 12.0f)) * flick * fv + sg * 1.5f;
+    for (int arm = 0; arm < 3; arm++) {
+        float an = -1.5708f + (float)arm * 2.0944f;
+        float ex = fx + cosf(an) * L, ez = fz2 + sinf(an) * L;
+        r_line(fx, fy, fz2, ex, fy, ez, 2.4f, RGBA(255, 250, 220, (int)(255 * fminf(fk, 1.0f))), RGBA(255, 220, 120, (int)(200 * fminf(fk, 1.0f))));
+        for (int d = 0; d < 2; d++) {
+            float u = 1.0f - fmodf(T * 3.0f + (float)d * 0.5f + (float)arm * 0.13f, 1.0f);
+            r_glow_cheap(fx + cosf(an) * L * u, fy + 0.005f, fz2 + sinf(an) * L * u, 0.05f, RGBA(255, 255, 230, (int)(230 * fminf(fk, 1.0f))));
+        }
+    }
+    r_glow(fx, fy, fz2, (0.35f + 0.5f * sg) * (0.4f + 0.6f * fv), RGBA(255, 240, 190, (int)(110 * fminf(fk, 1.0f))));
+    /* head and tail lights, and the hover pods where the wheels folded down */
+    for (int s2 = -1; s2 <= 1; s2 += 2) {
+        r_glow_cheap(x + 0.92f, hy + 0.07f, z + 0.25f * (float)s2, 0.1f, RGBA(255, 250, 220, 230));
+        r_line(x - 0.95f, hy + 0.09f, z + 0.12f * (float)s2, x - 0.95f, hy + 0.09f, z + 0.36f * (float)s2, 3.0f, RGBA(255, 50, 40, 230), RGBA(255, 50, 40, 230));
+    }
+    for (int k = 0; k < 4; k++)
+        r_glow_cheap(x + ((k & 1) ? 0.58f : -0.58f), hy - 0.05f, z + ((k & 2) ? 0.36f : -0.36f), 0.13f, RGBA(110, 190, 255, (int)(200 * (0.7f + 0.3f * sinf(T * 5.0f + (float)k)))));
+    /* sparks of loose energy crawling over the body during a surge or a lightning strike */
+    if (sg > 0 || G->giga_fx > 0) {
+        float k = fmaxf(sg, clampf(G->giga_fx / 2.0f, 0, 1));
+        for (int a2 = 0; a2 < 3; a2++) {
+            float u = fmodf(T * 2.0f + (float)a2 * 0.37f, 1.0f), px = x - 0.9f + 1.8f * u, j = sinf(T * 50.0f + (float)a2 * 2.0f) * 0.15f;
+            r_line(px, hy + 0.35f, z - 0.4f, px + 0.15f, hy + 0.55f + j, z + 0.4f, 1.6f, RGBA(180, 220, 255, (int)(255 * k)), RGBA(180, 220, 255, 0));
+        }
+    }
+    gfx_blend(BL_ALPHA);
+    r_scale_off();
+    wk_s = 1.0f;
 }
 
 static void draw_campfire(void)
@@ -1299,7 +1561,6 @@ static void eyes(float x, float y, float z, float ang, float fwd, float sep, flo
 }
 
 /* flat triangles / quads straight to the screen (sails, fins, flags): no culling, shaded at one point */
-static float wk_x, wk_z, wk_s = 1.0f;       /* the enemy model scale (r_scale does not reach these) */
 static void wtri(float ax, float ay, float az, float bx, float by, float bz, float cx, float cy, float cz, uint32_t c)
 {
     float s0x, s0y, s1x, s1y, s2x, s2y;
@@ -1851,6 +2112,209 @@ static void draw_enemy_model(const Enemy *e)
         }
         break;
     }
+    /* ---------------- level 6: visitors from the future ---------------- */
+    case EN_HOVERBOARD: {
+        /* a kid on a pink hoverboard, weaving and leaning */
+        float weave = sinf(e->anim * 0.9f) * 0.12f, px = -sa, pz = ca;
+        float bx = x + px * weave, bz = z + pz * weave, by = 0.12f + 0.03f * sinf(e->anim * 2.0f), lean = cosf(e->anim * 0.9f) * 0.25f;
+        uint32_t board = en_tint(e, 0xF050A0FF);
+        gfx_blend(BL_ADD);
+        r_gdisc(bx, bz, 0.01f, 0.22f, 10, RGBA(120, 255, 200, 80), 0x60FFC000);
+        gfx_blend(BL_ALPHA);
+        r_obox(bx, by, bz, 0.22f, 0.08f, by + 0.03f, a, board, scale_rgb(board, 0.75f));
+        r_obox(bx + ca * 0.16f, by + 0.01f, bz + sa * 0.16f, 0.05f, 0.075f, by + 0.04f, a, 0xFFE040FF, 0xD0B020FF);
+        float hx = bx + px * lean * 0.12f, hz = bz + pz * lean * 0.12f;
+        for (int s2 = -1; s2 <= 1; s2 += 2)
+            r_beam(bx + ca * 0.06f * (float)s2, by + 0.03f, bz + sa * 0.06f * (float)s2, px * lean * 0.3f, 1.0f, pz * lean * 0.3f, 0.16f, 0.035f, 0.035f, 0x3A4A80FF);
+        r_obox(hx, by + 0.19f, hz, 0.075f, 0.06f, by + 0.36f, a, en_tint(e, 0xE8701CFF), en_tint(e, 0xB85010FF));     /* puffy orange vest */
+        r_crystal(hx, by + 0.42f, hz, 0.05f, 0.045f, 0.035f, 6, a, en_tint(e, 0xE8B890FF));
+        r_prism(hx, by + 0.44f, hz, 0.055f, 0.045f, by + 0.48f, 6, a, 0xC02020FF, 0x901818FF);
+        gfx_blend(BL_ADD);
+        r_glow_cheap(bx - ca * 0.2f, by + 0.02f, bz - sa * 0.2f, 0.1f, RGBA(120, 255, 200, 160));
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_DRONE: {
+        /* a camera drone: four spinning rotors, blinking lights, a lens looking down */
+        float y = e->y;
+        r_gdisc(x, z, 0.006f, 0.2f, 12, 0x00000040, 0x00000000);
+        uint32_t body = en_tint(e, 0x404850FF);
+        r_obox(x, y - 0.04f, z, 0.09f, 0.09f, y + 0.04f, a, col_mix(body, 0xA0A8B0FF, 0.2f), body);
+        for (int k = 0; k < 4; k++) {
+            float an = a + 0.785f + (float)k * 1.5708f, rx = x + cosf(an) * 0.17f, rz = z + sinf(an) * 0.17f;
+            r_beam(x, y, z, cosf(an), 0, sinf(an), 0.17f, 0.025f, 0.02f, body);
+            float spin = T * 40.0f + (float)k;
+            uint32_t bl = lt_shade(0x8090A0FF, rx, y, rz, 0.9f);
+            r_line(rx - cosf(spin) * 0.09f, y + 0.035f, rz - sinf(spin) * 0.09f, rx + cosf(spin) * 0.09f, y + 0.035f, rz + sinf(spin) * 0.09f, 1.4f, bl, bl);
+        }
+        gfx_blend(BL_ADD);
+        int blink = fmodf(T * 2.0f + x, 1.0f) < 0.15f;
+        r_glow_cheap(x + ca * 0.1f, y, z + sa * 0.1f, 0.05f, RGBA(255, 60, 40, blink ? 255 : 90));
+        r_glow_cheap(x - ca * 0.1f, y, z - sa * 0.1f, 0.05f, RGBA(60, 255, 90, blink ? 90 : 255));
+        r_glow_cheap(x, y - 0.06f, z, 0.04f, RGBA(120, 200, 255, 200));
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_SERVO: {
+        /* a chunky chrome robot with a visor, clanking along on stubby legs */
+        float step = sinf(e->anim * 1.8f), px = -sa, pz = ca;
+        uint32_t chrome = en_tint(e, 0xB8C0CCFF), dk = scale_rgb(chrome, 0.7f);
+        if (e->armor_t > 0) chrome = col_mix(chrome, 0xFFFFFFFF, 0.5f);
+        for (int s2 = -1; s2 <= 1; s2 += 2) {
+            float f = step * 0.07f * (float)s2;
+            r_obox(x + ca * f + px * 0.1f * (float)s2, 0, z + sa * f + pz * 0.1f * (float)s2, 0.06f, 0.07f, 0.13f, a, 0x50545CFF, 0x40444CFF);
+        }
+        r_obox(x, 0.12f, z, 0.17f, 0.15f, 0.42f, a, chrome, dk);
+        r_obox(x + ca * 0.15f, 0.2f, z + sa * 0.15f, 0.02f, 0.1f, 0.34f, a, 0x30343CFF, 0x30343CFF);       /* chest panel */
+        for (int s2 = -1; s2 <= 1; s2 += 2) {
+            float sw = step * 0.4f * (float)s2;
+            r_beam(x + px * 0.2f * (float)s2, 0.36f, z + pz * 0.2f * (float)s2, ca * sw, -1.0f, sa * sw, 0.2f, 0.05f, 0.05f, dk);
+        }
+        r_prism(x, 0.42f, z, 0.11f, 0.09f, 0.56f, 8, a, chrome, dk);
+        r_prism(x, 0.56f, z, 0.012f, 0.008f, 0.68f, 4, 0, 0x606060FF, 0x505050FF);
+        gfx_blend(BL_ADD);
+        float vx = x + ca * 0.1f, vz = z + sa * 0.1f;
+        r_line(vx - sa * 0.07f, 0.5f, vz + ca * 0.07f, vx + sa * 0.07f, 0.5f, vz - ca * 0.07f, 3.0f, 0x60E8FFFF, 0x60E8FFFF);
+        r_glow_cheap(x, 0.69f, z, 0.04f, RGBA(255, 80, 60, fmodf(T * 1.5f + x, 1.0f) < 0.3f ? 255 : 80));
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_HOLOSHARK: {
+        /* a holographic shark swimming through the air: translucent blue, scanlines, glitching when out of reach */
+        int phased = e->dash_t > 0;
+        float fade = phased ? 0.12f + 0.1f * (sinf(T * 30.0f) > 0) : 0.6f + 0.1f * sinf(T * 9.0f);
+        float y = 0.42f + 0.06f * sinf(e->anim * 0.8f), sw = sinf(e->anim * 2.2f) * 0.08f, px = -sa, pz = ca;
+        float gl = phased || fmodf(T * 1.3f + x, 3.0f) < 0.08f ? sinf(T * 70.0f) * 0.06f : 0.0f;   /* glitch jump */
+        float gx = x + px * gl, gz = z + pz * gl;
+        r_gdisc(x, z, 0.006f, 0.3f, 12, RGBA(40, 120, 200, (int)(70 * fade)), 0x2060A000);
+        r_alpha = fade;
+        r_unlit = 1;
+        uint32_t skin = en_tint(e, 0x70C8FFFF), belly = 0xC0F0FFFF;
+        r_beam(gx - ca * 0.26f, y - 0.07f, gz - sa * 0.26f, ca, 0.0f, sa, 0.5f, 0.2f, 0.16f, skin);
+        r_beam(gx + ca * 0.22f, y - 0.08f, gz + sa * 0.22f, ca, -0.15f, sa, 0.16f, 0.14f, 0.11f, belly);
+        r_beam(gx - ca * 0.3f, y - 0.05f, gz - sa * 0.3f, -ca, 0.0f, -sa, 0.1f, 0.1f, 0.1f, skin);
+        r_unlit = 0;
+        r_alpha = 1.0f;
+        gfx_blend(BL_ADD);
+        uint32_t fc = RGBA(120, 210, 255, (int)(200 * fade));
+        wtri(gx + ca * 0.1f, y + 0.09f, gz + sa * 0.1f, gx - ca * 0.14f, y + 0.09f, gz - sa * 0.14f, gx - ca * 0.18f, y + 0.36f, gz - sa * 0.18f, fc);
+        for (int s2 = -1; s2 <= 1; s2 += 2)                 /* pectoral fins */
+            wtri(gx + ca * 0.05f + px * 0.08f * (float)s2, y - 0.08f, gz + sa * 0.05f + pz * 0.08f * (float)s2, gx - ca * 0.08f + px * 0.08f * (float)s2, y - 0.08f, gz - sa * 0.08f + pz * 0.08f * (float)s2,
+                 gx - ca * 0.12f + px * 0.26f * (float)s2, y - 0.16f, gz - sa * 0.12f + pz * 0.26f * (float)s2, fc);
+        float tx = gx - ca * 0.38f, tz = gz - sa * 0.38f;
+        wtri(tx, y, tz, tx - ca * 0.16f + px * (0.12f + sw), y + 0.14f, tz - sa * 0.16f + pz * (0.12f + sw), tx - ca * 0.16f + px * (-0.12f + sw), y - 0.12f, tz - sa * 0.16f + pz * (-0.12f + sw), fc);
+        for (int k = 0; k < 4; k++) {                        /* scanlines */
+            float yy = y - 0.06f + 0.04f * (float)k + fmodf(T * 0.3f, 0.04f);
+            r_line(gx - ca * 0.3f, yy, gz - sa * 0.3f, gx + ca * 0.3f, yy, gz + sa * 0.3f, 1.0f, RGBA(180, 240, 255, (int)(90 * fade)), RGBA(180, 240, 255, (int)(90 * fade)));
+        }
+        r_glow(x, y, z, 0.5f, RGBA(80, 170, 255, (int)(60 * fade)));
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_PARADOX: case EN_ECHO: {
+        /* a paradox: the same figure from two moments at once, the copies jittering apart; echoes are the leftovers */
+        int echo = e->type == EN_ECHO;
+        float k = echo ? 0.72f : 1.0f, step = sinf(e->anim * 2.0f), px = -sa, pz = ca;
+        float jit = (echo ? 0.03f : 0.06f) + 0.03f * sinf(T * 23.0f + x * 5.0f);
+        r_unlit = 1;
+        for (int cp = 0; cp < (echo ? 1 : 2); cp++) {
+            float off = echo ? 0.0f : (cp ? jit : -jit);
+            float cx = x + px * off - ca * (cp ? 0.04f : 0.0f), cz = z + pz * off - sa * (cp ? 0.04f : 0.0f);
+            uint32_t col = en_tint(e, echo ? 0xC8A0FFFF : (cp ? 0x60E0FFFF : 0xB060FFFF));
+            r_alpha = echo ? 0.55f : 0.7f;
+            for (int s2 = -1; s2 <= 1; s2 += 2) {
+                float f = step * 0.07f * (float)s2 * k;
+                r_obox(cx + ca * f + px * 0.06f * (float)s2 * k, 0, cz + sa * f + pz * 0.06f * (float)s2 * k, 0.04f * k, 0.04f * k, 0.18f * k, a, col, scale_rgb(col, 0.8f));
+            }
+            r_obox(cx, 0.17f * k, cz, 0.1f * k, 0.07f * k, 0.42f * k, a, col, scale_rgb(col, 0.8f));
+            r_crystal(cx, 0.5f * k, cz, 0.08f * k, 0.07f * k, 0.05f * k, 6, a, col_mix(col, 0xFFFFFFFF, 0.3f));
+        }
+        r_alpha = 1.0f;
+        r_unlit = 0;
+        gfx_blend(BL_ADD);
+        r_glow(x, 0.3f * k, z, 0.35f * k, RGBA(170, 110, 255, 70));
+        if (!echo) {                                         /* after-images trailing behind */
+            for (int t2 = 1; t2 <= 2; t2++) {
+                float bx = x - ca * 0.18f * (float)t2, bz = z - sa * 0.18f * (float)t2;
+                r_glow_cheap(bx, 0.3f, bz, 0.16f, RGBA(140, 90, 255, 60 / t2));
+            }
+        }
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_HOVERCAR: {
+        /* a flying car from the future: boxy teal-and-white body with fins, wheels turned flat into glowing pods */
+        float hy = 0.28f + 0.04f * sinf(T * 2.1f + x), px = -sa, pz = ca;
+        uint32_t paint = en_tint(e, 0x30D0C0FF), white = en_tint(e, 0xE8ECF0FF);
+        if (e->armor_t > 0) { paint = col_mix(paint, 0xFFFFFFFF, 0.4f); white = col_mix(white, 0xFFFFFFFF, 0.4f); }
+        gfx_blend(BL_ADD);
+        r_gdisc(x, z, 0.012f, 0.65f, 12, RGBA(90, 220, 255, 70), 0x40C0FF00);
+        gfx_blend(BL_ALPHA);
+        for (int k = 0; k < 4; k++) {
+            float wx = x + ca * ((k & 1) ? 0.3f : -0.3f) + px * ((k & 2) ? 0.24f : -0.24f), wz = z + sa * ((k & 1) ? 0.3f : -0.3f) + pz * ((k & 2) ? 0.24f : -0.24f);
+            r_prism(wx, hy - 0.06f, wz, 0.1f, 0.1f, hy - 0.02f, 8, 0, 0x202428FF, 0x181A1EFF);
+        }
+        r_obox(x, hy, z, 0.42f, 0.24f, hy + 0.13f, a, paint, scale_rgb(paint, 0.75f));
+        r_obox(x - ca * 0.05f, hy + 0.13f, z - sa * 0.05f, 0.24f, 0.2f, hy + 0.25f, a, white, 0x283848FF);
+        for (int s2 = -1; s2 <= 1; s2 += 2)                 /* tail fins */
+            r_obox(x - ca * 0.36f + px * 0.2f * (float)s2, hy + 0.13f, z - sa * 0.36f + pz * 0.2f * (float)s2, 0.07f, 0.02f, hy + 0.27f, a, white, scale_rgb(white, 0.8f));
+        gfx_blend(BL_ADD);
+        for (int k = 0; k < 4; k++) {
+            float wx = x + ca * ((k & 1) ? 0.3f : -0.3f) + px * ((k & 2) ? 0.24f : -0.24f), wz = z + sa * ((k & 1) ? 0.3f : -0.3f) + pz * ((k & 2) ? 0.24f : -0.24f);
+            r_glow_cheap(wx, hy - 0.07f, wz, 0.1f, RGBA(100, 220, 255, 200));
+        }
+        for (int s2 = -1; s2 <= 1; s2 += 2) r_glow_cheap(x + ca * 0.43f + px * 0.15f * (float)s2, hy + 0.07f, z + sa * 0.43f + pz * 0.15f * (float)s2, 0.07f, RGBA(255, 250, 220, 230));
+        float charge = clampf(1.0f - e->pulse_t / 0.8f, 0, 1);
+        if (charge > 0) r_gring(x, z, 0.03f, 0.5f + 0.4f * charge, 0.05f, 14, RGBA(120, 240, 255, (int)(200 * charge)));
+        gfx_blend(BL_ALPHA);
+        break;
+    }
+    case EN_TIMETRAIN: {
+        /* the Time Train: a flying steam locomotive, black and brass, on glowing hover pods, the firebox roaring */
+        if (e->dash_t > 0) {
+            /* mid time-jump: just a white-hot streak */
+            gfx_blend(BL_ADD);
+            r_glowline(e->jx, 0.5f, e->jz, x, 0.5f, z, 30.0f, RGBA(180, 220, 255, 120));
+            r_line(e->jx, 0.5f, e->jz, x, 0.5f, z, 5.0f, RGBA(255, 255, 255, 230), RGBA(200, 230, 255, 120));
+            r_glow(x, 0.5f, z, 1.0f, RGBA(220, 240, 255, 200));
+            gfx_blend(BL_ALPHA);
+            break;
+        }
+        float hy = 0.22f + 0.04f * sinf(T * 1.4f), px = -sa, pz = ca;
+        uint32_t iron = en_tint(e, 0x30343CFF), iron2 = scale_rgb(iron, 0.75f), brass = 0xC89838FF, red = en_tint(e, 0xA02820FF);
+        if (e->armor_t > 0) { iron = col_mix(iron, 0xFFFFFFFF, 0.4f); iron2 = col_mix(iron2, 0xFFFFFFFF, 0.3f); }
+        gfx_blend(BL_ADD);
+        r_gdisc(x, z, 0.012f, 1.0f, 14, RGBA(90, 160, 255, 80), 0x4080FF00);
+        gfx_blend(BL_ALPHA);
+        r_obox(x, hy, z, 0.68f, 0.22f, hy + 0.1f, a, red, scale_rgb(red, 0.7f));                 /* running board / frame */
+        for (int k = -2; k <= 2; k++) {                                                          /* wheels with pistons */
+            float wx = x + ca * 0.24f * (float)k, wz = z + sa * 0.24f * (float)k;
+            for (int s2 = -1; s2 <= 1; s2 += 2)
+                r_beam(wx + px * 0.24f * (float)s2, hy + 0.02f, wz + pz * 0.24f * (float)s2, px * (float)s2, 0, pz * (float)s2, 0.04f, 0.2f, 0.2f, 0x202024FF);
+        }
+        r_beam(x - ca * 0.2f, hy + 0.1f, z - sa * 0.2f, ca, 0, sa, 0.75f, 0.32f, 0.3f, iron);                 /* boiler */
+        for (int k = 0; k < 3; k++)
+            r_beam(x + ca * (0.0f + 0.22f * (float)k), hy + 0.095f, z + sa * (0.0f + 0.22f * (float)k), ca, 0, sa, 0.03f, 0.33f, 0.31f, brass);
+        r_obox(x - ca * 0.44f, hy + 0.1f, z - sa * 0.44f, 0.2f, 0.22f, hy + 0.62f, a, iron2, iron);              /* the cab */
+        r_obox(x - ca * 0.44f, hy + 0.62f, z - sa * 0.44f, 0.24f, 0.25f, hy + 0.66f, a, 0x202024FF, 0x202024FF);
+        r_prism(x + ca * 0.38f, hy + 0.4f, z + sa * 0.38f, 0.07f, 0.11f, hy + 0.66f, 8, 0, iron2, iron);        /* smokestack */
+        r_prism(x + ca * 0.12f, hy + 0.4f, z + sa * 0.12f, 0.07f, 0.06f, hy + 0.5f, 8, 0, brass, scale_rgb(brass, 0.8f));
+        r_obox(x + ca * 0.66f, hy - 0.04f, z + sa * 0.66f, 0.06f, 0.2f, hy + 0.14f, a + 0.0f, red, scale_rgb(red, 0.7f));   /* cow-catcher */
+        gfx_blend(BL_ADD);
+        for (int k = -1; k <= 1; k += 2)                                                         /* hover pods */
+            for (int s2 = -1; s2 <= 1; s2 += 2)
+                r_glow_cheap(x + ca * 0.45f * (float)k + px * 0.25f * (float)s2, hy - 0.04f, z + sa * 0.45f * (float)k + pz * 0.25f * (float)s2, 0.14f, RGBA(110, 190, 255, 220));
+        r_glow(x - ca * 0.3f, hy + 0.2f, z - sa * 0.3f, 0.35f, RGBA(255, 120, 40, 140));          /* firebox */
+        r_glow_cheap(x + ca * 0.76f, hy + 0.3f, z + sa * 0.76f, 0.12f, RGBA(255, 250, 210, 240)); /* headlamp */
+        for (int k = 0; k < 4; k++) {                                                            /* steam puffing from the stack */
+            float u = fmodf(T * 0.8f + (float)k * 0.25f, 1.0f);
+            r_glow(x + ca * (0.38f - u * 0.6f), hy + 0.7f + u * 0.6f, z + sa * (0.38f - u * 0.6f), 0.15f + u * 0.3f, RGBA(200, 200, 215, (int)(60 * (1.0f - u))));
+        }
+        float charge = clampf(1.0f - e->pulse_t / 1.0f, 0, 1);                                   /* about to jump: crackling */
+        if (charge > 0) r_glow(x, 0.5f, z, 0.8f + 0.6f * charge, RGBA(160, 210, 255, (int)(150 * charge)));
+        gfx_blend(BL_ALPHA);
+        break;
+    }
     /* ---------------- level 5: pirates ---------------- */
     case EN_ROWBOAT: {
         float bob = sinf(T * 2.2f + x * 1.3f + z) * 0.025f, px = -sa, pz = ca;
@@ -2106,6 +2570,7 @@ static void build_static(void)
     if (AUTUMN) build_autumn_ground();
     if (ISLAND) build_island_ground();
     if (PIRATE) build_pirate_ground();
+    if (FUTURE) build_future_ground();
     if (ISLAND)          /* brass gears on a few wall fronts */
         for (int r = 0; r < MH; r++) for (int c = 0; c < MW; c++)
             if (G->tile[r][c].kind == TL_WALL && !solid(c, r + 1) && hf(c, r, 120) < 0.16f && nprop < MAX_PROP) {
@@ -2120,6 +2585,10 @@ static void build_static(void)
             int c = col_order[i];
             if (!in_map(c, r)) {
                 if (outside_lane(c, r)) continue;
+                if (FUTURE) {                                  /* the town beyond the square */
+                    if (hf(c, r, 2) < 0.7f) draw_building(c, r);
+                    continue;
+                }
                 if (PIRATE) {                                  /* the open sea: a rock here and there */
                     if (hf(c, r, 2) < 0.06f && (c < -1 || c > MW || r < -1 || r > MH))
                         draw_sea_rock((float)c + 0.5f, (float)r + 0.5f, 0.8f + 0.5f * hf(c, r, 3), hf(c, r, 4) * 6.0f);
@@ -2141,10 +2610,12 @@ static void build_static(void)
             const Tile *t = &G->tile[r][c];
             switch (t->kind) {
             case TL_TREE:
+                if (FUTURE) { draw_building(c, r); break; }
                 if (PIRATE) { if (hf(c, r, 2) < 0.55f) draw_sea_rock((float)c + 0.5f + (hf(c, r, 5) - 0.5f) * 0.3f, (float)r + 0.5f, 0.6f + 0.5f * hf(c, r, 3), hf(c, r, 4) * 6.0f); break; }
                 draw_tree(c, r); break;
             case TL_GRAVE:
                 if (PIRATE) { if (t->color == DECO_WRECK) draw_wreck(c, r); break; }
+                if (FUTURE) { if (t->color == DECO_CLOCK) draw_clock_tower(c, r); else draw_lamp_post(c, r); break; }
                 if (ISLAND) { draw_island_prop(c, r, t); break; }
                 draw_grave((float)c + 0.5f + (hf(c, r, 4) - 0.5f) * 0.25f, (float)r + 0.45f, hf(c, r, 5), (hf(c, r, 6) - 0.5f) * 0.4f, hf(c, r, 3) < 0.3f);
                 break;
@@ -2165,6 +2636,86 @@ static void draw_row_props(int row)
         const Prop *p = &prop[i];
         if (p->row != row) continue;
         float x = p->x, z = p->z;
+        if (p->kind == PR_CLOCK) {
+            /* the clock face, stopped at 10:04, glowing; crackling blue when the lightning hits */
+            float fz = z + 0.365f, cy = p->y, R = 0.24f;
+            float k = clampf(G->giga_fx / 2.0f, 0, 1);
+            float sx, sy;
+            proj(x, cy, fz, &sx, &sy);
+            float pr = R * proj_scale(cy, fz);
+            gfx_poly(sx, sy, pr * 1.12f, 16, 0, lt_shade(0x6A5A40FF, x, cy, fz, 1.0f));
+            gfx_poly(sx, sy, pr, 16, 0, col_mix(RGBA(250, 238, 200, 255), RGBA(200, 230, 255, 255), k));
+            for (int h = 0; h < 12; h++) {
+                float a = (float)h / 12.0f * 6.2832f;
+                gfx_rect(sx + sinf(a) * pr * 0.82f - 1, sy - cosf(a) * pr * 0.82f - 1, 2, 2, 0x302820FF);
+            }
+            float ha = (10.0f + 4.0f / 60.0f) / 12.0f * 6.2832f, ma = 4.0f / 60.0f * 6.2832f;
+            gfx_line(sx, sy, sx + sinf(ha) * pr * 0.5f, sy - cosf(ha) * pr * 0.5f, 2.6f, 0x201810FF, 0x201810FF);
+            gfx_line(sx, sy, sx + sinf(ma) * pr * 0.78f, sy - cosf(ma) * pr * 0.78f, 1.8f, 0x201810FF, 0x201810FF);
+            gfx_blend(BL_ADD);
+            r_glow(x, cy, fz, 0.5f + 1.5f * k, RGBA(255, 230, 170, 60));
+            if (k > 0) {
+                r_glow(x, 2.6f, z, 1.6f * k, RGBA(150, 200, 255, (int)(200 * k)));
+                for (int a2 = 0; a2 < 3; a2++) {                  /* electricity crawling over the tower */
+                    float y0 = 0.4f + fmodf(T * 3.0f + (float)a2 * 0.7f, 2.2f), j = sinf(T * 40.0f + (float)a2) * 0.2f;
+                    r_line(x - 0.4f, y0, z + 0.37f, x + j, y0 + 0.2f, z + 0.37f, 1.6f, RGBA(180, 220, 255, (int)(255 * k)), RGBA(180, 220, 255, 0));
+                }
+            }
+            gfx_blend(BL_ALPHA);
+            continue;
+        }
+        if (p->kind == PR_LAMP) {
+            float k = flicker(p->ph);
+            r_light_model(x, p->y, z);
+            r_prism(x, p->y - 0.04f, z, 0.12f, 0.06f, p->y + 0.06f, 6, 0, 0x404048FF, 0x303038FF);
+            r_light_off();
+            r_unlit = 1;
+            r_prism(x, p->y - 0.12f, z, 0.08f, 0.1f, p->y - 0.04f, 6, 0, RGBA(255, 230, 170, 255), RGBA((int)(255 * k), (int)(210 * k), 140, 255));
+            r_unlit = 0;
+            gfx_blend(BL_ADD);
+            r_glow(x, p->y - 0.1f, z, 0.6f * k, RGBA(255, 200, 120, 110));
+            gfx_blend(BL_ALPHA);
+            continue;
+        }
+        if (p->kind == PR_PORTAL) {
+            /* a time portal: two swirling rings standing across the road, crackling blue-white */
+            int along_x = p->y > 0.5f;
+            float cyy = 0.6f, R = 0.55f;
+            gfx_blend(BL_ADD);
+            for (int ring2 = 0; ring2 < 2; ring2++) {
+                float spin = T * (ring2 ? -2.3f : 1.7f) + p->ph, rr = R * (ring2 ? 0.75f : 1.0f);
+                float ox = 0, oy = 0, oz = 0;
+                for (int k = 0; k <= 16; k++) {
+                    float a = (float)k / 16.0f * 6.2832f + spin, wob = 1.0f + 0.08f * sinf(a * 3.0f + T * 6.0f);
+                    float u = cosf(a) * rr * wob, vv = sinf(a) * rr * wob;
+                    float px = along_x ? x : x + u, pz = along_x ? z + u : z, py = cyy + vv;
+                    if (k) {
+                        float br = 0.6f + 0.4f * sinf(a * 2.0f + T * 5.0f);
+                        r_line(ox, oy, oz, px, py, pz, ring2 ? 1.6f : 2.4f, RGBA(120, 190, 255, (int)(220 * br)), RGBA(200, 240, 255, (int)(220 * br)));
+                    }
+                    ox = px; oy = py; oz = pz;
+                }
+            }
+            r_glow(x, cyy, z, 0.9f, RGBA(90, 150, 255, (int)(70 + 30 * sinf(T * 4.0f + p->ph))));
+            r_glow_cheap(x, cyy, z, 0.25f, RGBA(220, 240, 255, 200));
+            gfx_blend(BL_ALPHA);
+            continue;
+        }
+        if (p->kind == PR_NEON) {
+            /* a neon sign on a shop front: a glowing tube rectangle, flickering now and then */
+            uint32_t c = BLOCK_COL[(int)p->y];
+            int off = fmodf(T * 0.7f + p->ph, 7.0f) < 0.25f && sinf(T * 60.0f) > 0;
+            if (off) continue;
+            gfx_blend(BL_ADD);
+            float y0 = 0.5f, y1 = 0.72f, w = 0.34f;
+            uint32_t cc = col_a(col_mix(c, 0xFFFFFFFF, 0.3f), 0.95f);
+            r_line(x - w, y0, z, x + w, y0, z, 2.0f, cc, cc); r_line(x - w, y1, z, x + w, y1, z, 2.0f, cc, cc);
+            r_line(x - w, y0, z, x - w, y1, z, 2.0f, cc, cc); r_line(x + w, y0, z, x + w, y1, z, 2.0f, cc, cc);
+            r_line(x - w * 0.6f, (y0 + y1) * 0.5f, z, x + w * 0.6f, (y0 + y1) * 0.5f, z, 2.0f, cc, cc);
+            r_glow(x, (y0 + y1) * 0.5f, z, 0.55f, col_a(c, 0.35f));
+            gfx_blend(BL_ALPHA);
+            continue;
+        }
         if (p->kind == PR_BUOY || p->kind == PR_BARREL) {
             /* bobbing and tipping in the swell */
             float bob = sinf(T * 2.0f + p->ph) * 0.05f, tip = sinf(T * 1.6f + p->ph * 1.3f) * 0.12f;
@@ -2294,14 +2845,14 @@ static void draw_world(void)
     int ghost = G->state == ST_PLAY && can_build(G, G->cx, G->cz);
     for (int r = ROW_MIN; r < ROW_MAX; r++) {
         rc_draw(SLOT_ROW0 + r - ROW_MIN, SHX, SHY);
-        if (HALLOW || ISLAND || PIRATE) draw_row_props(r - ROW_MIN);
+        if (HALLOW || ISLAND || PIRATE || FUTURE) draw_row_props(r - ROW_MIN);
         if (r >= 0 && r < MH)
             for (int i = 0; i < MW + 12; i++) {
                 int c = col_order[i];
                 if (!in_map(c, r)) continue;
                 const Tile *t = &G->tile[r][c];
                 if (t->torch && G->tw[r][c].type < 0) draw_torch(c, r, t);
-                if (c == FIRE_C && r == FIRE_R) { if (PIRATE) draw_treasure(); else draw_campfire(); }
+                if (c == FIRE_C && r == FIRE_R) { if (PIRATE) draw_treasure(); else if (FUTURE) draw_delorean(); else draw_campfire(); }
                 if (G->tw[r][c].type >= 0) draw_tower_at(c, r);
                 if (ghost && c == G->cx && r == G->cz) {
                     int afford = G->gold >= tower_cost(G->sel, 0);
@@ -2477,7 +3028,7 @@ static void draw_leaves(void)
 
 static void draw_rain(void)
 {
-    if (HALLOW || ISLAND) return;
+    if (HALLOW || ISLAND || FUTURE) return;
     if (AUTUMN) { draw_leaves(); return; }
     float f = G->flash;
     uint32_t c = RGBA(170, 190, 235, (int)(60 + 110 * clampf(f, 0, 1)));
@@ -2657,6 +3208,20 @@ static void draw_mist_vignette(void)
     if (ISLAND) { draw_island_dawn(); return; }
     if (HALLOW) { draw_hallow_night(); return; }
     if (AUTUMN) { draw_golden_hour(); return; }
+    if (FUTURE) {
+        /* a hazy night over the town: purple sky glow at the far edge, low drifting steam, the time surge rippling out */
+        gfx_rect_v(0, 0, VW, 150, RGBA(110, 60, 140, 110), RGBA(80, 50, 120, 0));
+        for (int i = 0; i < 7; i++) {
+            float xx = fmodf((float)i * 4.1f + T * 0.2f, 34.0f) - 4.0f, zz = (float)((i * 5) % 17) + 0.5f;
+            r_glow(xx, 0.3f, zz, 2.6f, RGBA(140, 130, 180, 22));
+        }
+        if (G->surge_t > 0) {
+            float k = clampf(G->surge_t / 1.6f, 0, 1);
+            gfx_blend(BL_ADD);
+            gfx_rect(0, 0, VW, VH, RGBA(110, 170, 255, (int)(60 * k * k)));
+            gfx_blend(BL_ALPHA);
+        }
+    }
     if (PIRATE) {
         /* spray blown across the sea in the gusts */
         float gs = G->gust;
@@ -2803,7 +3368,11 @@ static void draw_hud(void)
     uint32_t gcol = col_mix(0xFFE070FF, 0xFFFFFFFF, G->gold_flash);
     snprintf(buf, sizeof buf, "%d", G->gold);
     gfx_text_s(buf, 50, 23, 2.4f, gcol);
-    if (PIRATE) {                                    /* a little treasure chest */
+    if (FUTURE) {                                    /* a lightning bolt */
+        uint32_t bc = col_mix(0xFFD040FF, 0xFFFFFFFF, G->fire_flash);
+        gfx_tri(36, 45, bc, 28, 56, bc, 34, 56, bc);
+        gfx_tri(34, 54, bc, 40, 54, bc, 30, 66, bc);
+    } else if (PIRATE) {                                    /* a little treasure chest */
         gfx_rect(26, 52, 17, 9, 0x8A5028FF); gfx_rect(26, 47, 17, 5, 0xB07038FF); gfx_rect(26, 51, 17, 2, 0xE0B040FF);
         gfx_rect(33, 52, 3, 4, 0xFFD860FF);
     } else flame_icon(34, 55, 9, 0.6f + 0.4f * G->fire_vis);
@@ -2835,6 +3404,51 @@ static void draw_hud(void)
         float a = 0.6f + 0.4f * sinf(T * 6.0f);
         gfx_tri(VW - 252, 26, col_a(0xFFFFFFFF, a), VW - 252, 46, col_a(0xFFFFFFFF, a), VW - 240, 36, col_a(0xFFFFFFFF, a));
         gfx_tri(VW - 238, 26, col_a(0xFFFFFFFF, a), VW - 238, 46, col_a(0xFFFFFFFF, a), VW - 226, 36, col_a(0xFFFFFFFF, a));
+    }
+
+    if (FUTURE) {
+        /* pinball score and the 88 MPH meter */
+        panel(14, 76, 168, 46, 0x0A0E18B8);
+        snprintf(buf, sizeof buf, "%ld", G->score);
+        gfx_text_s(buf, 24, 82, 1.6f, 0xFFA030FF);
+        float m = (float)G->mph / 88.0f;
+        gfx_rect(24, 104, 110, 9, 0x000000C0);
+        gfx_rect_v(25, 105, 108 * m, 7, 0x80E0FFFF, 0x3070E0FF);
+        snprintf(buf, sizeof buf, "%d MPH", G->mph);
+        gfx_text_sr(buf, 176, 104, 1.2f, m > 0.85f && fmodf(T, 0.4f) < 0.2f ? 0xFFFFFFFF : 0x90D8FFFF);
+        if (G->combo >= 3 && G->combo_t > 0) {
+            snprintf(buf, sizeof buf, "COMBO %d", G->combo);
+            gfx_text_s(buf, 24, 126, 1.4f, col_a(0xFF70D0FF, clampf(G->combo_t, 0, 1)));
+        }
+    }
+    /* the pinball dot-matrix display: callouts pop up, the bulbs round it chase */
+    if (FUTURE && G->dmd_t < 2.4f) {
+        float t = G->dmd_t, pop = clampf(t / 0.15f, 0, 1), fade = t > 2.0f ? (2.4f - t) / 0.4f : 1.0f;
+        if (!(t > 1.9f && fmodf(t, 0.16f) < 0.08f)) {
+            float px1 = 3.6f * (0.6f + 0.4f * pop), px2 = 2.2f * (0.6f + 0.4f * pop);
+            float w1 = gfx_text_width(G->dmd[0], px1), w2 = gfx_text_width(G->dmd[1], px2), w = fmaxf(w1, w2) + 40.0f;
+            float h = G->dmd[1][0] ? 74.0f : 50.0f, x0 = VW * 0.5f - w * 0.5f, y0 = 128.0f;
+            gfx_rect(x0 - 4, y0 - 4, w + 8, h + 8, col_a(0x3A1A08FF, 0.85f * fade));
+            gfx_rect(x0, y0, w, h, col_a(0x120804FF, 0.92f * fade));
+            uint32_t c = col_a(G->dmd_c, fade);
+            float ty = y0 + 10.0f;
+            gfx_text_c(G->dmd[0], VW * 0.5f, ty, px1, c);
+            if (G->dmd[1][0]) gfx_text_c(G->dmd[1], VW * 0.5f, ty + 36.0f, px2, col_a(0xFFC060FF, fade));
+            /* dot-matrix grid over the letters */
+            uint32_t gc = col_a(0x120804FF, 0.9f * fade);
+            for (float yy = y0; yy < y0 + h; yy += 2.6f) gfx_rect(x0, yy, w, 0.8f, gc);
+            for (float xx = x0; xx < x0 + w; xx += 2.6f) gfx_rect(xx, y0, 0.8f, h, gc);
+            gfx_blend(BL_ADD);
+            int nb = (int)(w / 18.0f);
+            for (int i = 0; i < nb; i++) {                   /* chasing bulbs top and bottom */
+                int on = ((i + (int)(T * 14.0f)) % 3) == 0;
+                uint32_t bcl = on ? col_a(0xFFD080FF, fade) : col_a(0x603010FF, fade);
+                gfx_glow_cheap(x0 + 9.0f + (float)i * 18.0f, y0 - 8.0f, on ? 5.0f : 3.0f, bcl);
+                gfx_glow_cheap(x0 + w - 9.0f - (float)i * 18.0f, y0 + h + 8.0f, on ? 5.0f : 3.0f, bcl);
+            }
+            gfx_glow(VW * 0.5f, y0 + h * 0.5f, w * 0.6f, col_a(G->dmd_c, 0.12f * fade * (1.0f - t * 0.3f)));
+            gfx_blend(BL_ALPHA);
+        }
     }
 
     /* boss bar */
@@ -2951,14 +3565,14 @@ static void draw_title(void)
 {
     gfx_rect(0, 0, VW, VH, AUTUMN ? 0x1A0C0060 : (HALLOW ? 0x0A061870 : (ISLAND ? 0x0A142060 : (PIRATE ? 0x04101870 : 0x02040A70))));
     fire_text("STORMFIRE", VW * 0.5f, 104, 10.0f);
-    gfx_text_sc(PIRATE ? "PIRATES ARE COMING FOR THE TREASURE. HOLD THE ISLAND!" : ISLAND ? "AN ISLAND OF OLD MACHINES. HOLD IT TILL SUNRISE." : HALLOW ? "THE DEAD WALK TONIGHT. KEEP THE FIRE LIT." : (AUTUMN ? "HOLD THE FIRE TILL THE SUN GOES DOWN" : "KEEP THE CAMPFIRE BURNING THROUGH THE STORM"),
-                VW * 0.5f, 190, 1.8f, PIRATE ? 0xC8E4F0FF : ISLAND ? 0xFFE0C8FF : HALLOW ? 0xD8C8FFFF : (AUTUMN ? 0xFFE8C8FF : 0xC8D4F0FF));
+    gfx_text_sc(FUTURE ? "PROTECT THE TIME MACHINE. 1.21 GIGAWATTS!" : PIRATE ? "PIRATES ARE COMING FOR THE TREASURE. HOLD THE ISLAND!" : ISLAND ? "AN ISLAND OF OLD MACHINES. HOLD IT TILL SUNRISE." : HALLOW ? "THE DEAD WALK TONIGHT. KEEP THE FIRE LIT." : (AUTUMN ? "HOLD THE FIRE TILL THE SUN GOES DOWN" : "KEEP THE CAMPFIRE BURNING THROUGH THE STORM"),
+                VW * 0.5f, 190, 1.8f, FUTURE ? 0xC8E8FFFF : PIRATE ? 0xC8E4F0FF : ISLAND ? 0xFFE0C8FF : HALLOW ? 0xD8C8FFFF : (AUTUMN ? 0xFFE8C8FF : 0xC8D4F0FF));
     /* level picker */
     char lb[48];
     snprintf(lb, sizeof lb, "LEVEL %d: %s", G->level + 1, G->lv->name);
     float lw = gfx_text_width(lb, 2.4f), nudge = sinf(T * 5.0f) * 3.0f;
     panel(VW * 0.5f - lw * 0.5f - 52, 216, lw + 104, 36, 0x0A0E18C8);
-    gfx_text_sc(lb, VW * 0.5f, 226, 2.4f, PIRATE ? 0xFFD060FF : ISLAND ? 0x90E8E0FF : HALLOW ? 0xC890FFFF : (AUTUMN ? 0xFFC060FF : 0x90D8FFFF));
+    gfx_text_sc(lb, VW * 0.5f, 226, 2.4f, FUTURE ? 0xFF9040FF : PIRATE ? 0xFFD060FF : ISLAND ? 0x90E8E0FF : HALLOW ? 0xC890FFFF : (AUTUMN ? 0xFFC060FF : 0x90D8FFFF));
     gfx_text_s("<", VW * 0.5f - lw * 0.5f - 38 - nudge, 226, 2.4f, 0xFFFFFFC0);
     gfx_text_s(">", VW * 0.5f + lw * 0.5f + 24 + nudge, 226, 2.4f, 0xFFFFFFC0);
     if (fmodf(T, 1.2f) < 0.85f) gfx_text_sc("PRESS A TO START", VW * 0.5f, 272, 2.6f, 0xFFFFFFFF);
@@ -2978,7 +3592,7 @@ static void draw_end(void)
     gfx_rect(0, 0, VW, VH, RGBA(2, 4, 10, (int)(150 * a)));
     char buf[64];
     if (G->state == ST_WIN) {
-        fire_text(PIRATE ? "THE TREASURE IS SAFE!" : "THE FIRE SURVIVES!", VW * 0.5f, 120, 5.5f);
+        fire_text(FUTURE ? "THE DELOREAN IS SAFE!" : PIRATE ? "THE TREASURE IS SAFE!" : "THE FIRE SURVIVES!", VW * 0.5f, 120, FUTURE ? 5.0f : 5.5f);
         int stars = G->fire >= 16 ? 3 : (G->fire >= 8 ? 2 : 1);
         for (int i = 0; i < 3; i++) {
             float x = VW * 0.5f + ((float)i - 1.0f) * 70.0f, y = 222;
@@ -2995,14 +3609,19 @@ static void draw_end(void)
             }
         }
     } else {
-        gfx_text_sc(PIRATE ? "THE PIRATES TOOK THE TREASURE" : "THE FIRE HAS GONE OUT", VW * 0.5f, 130, PIRATE ? 3.6f : 4.5f, 0x90A8D0FF);
+        gfx_text_sc(FUTURE ? "THE TIME MACHINE IS GONE" : PIRATE ? "THE PIRATES TOOK THE TREASURE" : "THE FIRE HAS GONE OUT", VW * 0.5f, 130, PIRATE || FUTURE ? 3.6f : 4.5f, 0x90A8D0FF);
     }
     int nwv = G->lv->nwaves;
     snprintf(buf, sizeof buf, "WAVES SURVIVED  %d/%d", G->state == ST_WIN ? nwv : (G->wave > 0 ? G->wave - 1 : 0), nwv);
     gfx_text_sc(buf, VW * 0.5f, 280, 2.0f, 0xE0E8FFFF);
     snprintf(buf, sizeof buf, "ENEMIES DEFEATED  %d", G->kills);
     gfx_text_sc(buf, VW * 0.5f, 306, 2.0f, 0xE0E8FFFF);
-    snprintf(buf, sizeof buf, PIRATE ? "TREASURE LEFT  %d/%d" : "FIRE LEFT  %d/%d", G->fire, FIRE_HP);
+    snprintf(buf, sizeof buf, FUTURE ? "TIME MACHINE  %d/%d" : PIRATE ? "TREASURE LEFT  %d/%d" : "FIRE LEFT  %d/%d", G->fire, FIRE_HP);
+    if (FUTURE) {
+        char sc[48];
+        snprintf(sc, sizeof sc, "SCORE %ld", G->score);
+        gfx_text_sc(sc, VW * 0.5f, 358, 2.0f, 0xFFA030FF);
+    }
     gfx_text_sc(buf, VW * 0.5f, 332, 2.0f, 0xFFC080FF);
     if (G->end_t > 2.0f) {
         if (G->state == ST_WIN && G->level + 1 < NUM_LEVELS) snprintf(buf, sizeof buf, "PRESS A FOR LEVEL %d", G->level + 2);
@@ -3071,6 +3690,10 @@ void game_render(const Game *g)
         for (int i = 0; i < 3; i++) { B[i] = K[k0][i] + (K[k0 + 1][i] - K[k0][i]) * f; U[i] = B[i] * 0.1f; }
         lt_set_ambient(B, U, 0.22f);
         rc_set_stretch(2.6f - 2.0f * s);                         /* long dawn shadows shorten as it climbs */
+    } else if (FUTURE) {
+        /* night in the town square: a cool violet ambience, neon and lamps do the rest */
+        static const float B[3] = { 0.22f, 0.21f, 0.33f }, U[3] = { 0.05f, 0.05f, 0.07f };
+        lt_set_ambient(B, U, 0.0f);
     } else if (PIRATE) {
         /* storm at sea: dark green-blue, the lightning does the rest */
         static const float B[3] = { 0.27f, 0.32f, 0.40f }, U[3] = { 0.06f, 0.07f, 0.08f };
@@ -3092,6 +3715,7 @@ void game_render(const Game *g)
     /* sky glow behind everything (only visible at the very top) */
     if (ISLAND) gfx_rect_v(0, 0, VW, VH, 0x2C5070FF, 0x1C3850FF);
     else if (PIRATE) gfx_rect_v(0, 0, VW, VH, 0x16303EFF, 0x0C1C28FF);
+    else if (FUTURE) gfx_rect_v(0, 0, VW, VH, 0x2A1C40FF, 0x100C1CFF);
     else if (HALLOW) gfx_rect_v(0, 0, VW, VH, 0x2A2040FF, 0x100C18FF);
     else if (AUTUMN) gfx_rect_v(0, 0, VW, VH, 0x5A3A20FF, 0x2A1A10FF);
     else gfx_rect_v(0, 0, VW, VH, 0x0A1220FF, 0x05080EFF);

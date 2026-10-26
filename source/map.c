@@ -5,7 +5,7 @@
  *   .  path (enemies walk here)          F  the campfire plaza (3 x 3, always in the middle)
  *   #  wall (build on top)               t  wall with a torch
  *   ,  grass lawn (build here too)       T  forest (nothing goes here)
- *   G  graveyard, O orrery, R rune stone, S shipwreck, W open water (props: nothing goes here)
+ *   G  graveyard, O orrery, R rune stone, S shipwreck, W open water, C clock tower, L street lamp (props: nothing goes here)
  *   r o y g m b p c   coloured blocks (build on top): red orange yellow green mint blue purple cyan
  */
 #include "game_int.h"
@@ -60,6 +60,15 @@ const EnemyDef ENEMIES[EN_TYPES] = {
     { "PARROT",        90,  1.10f, 0.26f, 1,   9,   1,  0,   0, -1, 0,           0xE83A2AFF,  0, 0, 0,     -1, 0, 0 },
     { "PIRATE SHIP", 1500,  0.30f, 0.60f, 0,  70,   3,  9,   0, -1, 0,           0x6A4428FF,  0, 0, 0,     -1, 0, 0 },
     { "KRAKEN",      4500,  0.20f, 1.10f, 0, 400,  10,  8,   1, EN_SHARK, 4,     0x7E3A72FF,  0, 0, 0,     EN_SHARK, 2, 9.0f },
+    /* level 6: visitors from the future */
+    { "HOVERBOARDER", 190,  1.05f, 0.28f, 0,  14,   1,  0,   0, -1, 0,           0xF050A0FF,  0, 0, 0,     -1, 0, 0 },
+    { "DRONE",        120,  1.05f, 0.26f, 1,  10,   1,  0,   0, -1, 0,           0x404850FF,  0, 0, 0,     -1, 0, 0 },
+    { "SERVO BOT",    420,  0.50f, 0.38f, 0,  22,   1,  8,   0, -1, 0,           0xB8C0CCFF,  0, 0, 0,     -1, 0, 0 },
+    { "HOLO-SHARK",   240,  0.80f, 0.36f, 0,  18,   1,  0,   0, -1, 0,           0x60C8FFFF,  0, 0, 0,     -1, 0, 0 },
+    { "PARADOX",      280,  0.66f, 0.34f, 0,  14,   1,  0,   0, EN_ECHO, 2,      0xA060FFFF,  0, 0, 0,     -1, 0, 0 },
+    { "ECHO",          80,  0.90f, 0.24f, 0,   5,   1,  0,   0, -1, 0,           0xC8A0FFFF,  0, 0, 0,     -1, 0, 0 },
+    { "HOVER CAR",   1800,  0.32f, 0.58f, 0,  75,   3, 10,   0, -1, 0,           0x30D0C0FF,  0, 0, 0,     -1, 0, 0 },
+    { "TIME TRAIN",  5600,  0.20f, 1.05f, 0, 450,  10,  9,   1, EN_PARADOX, 3,   0x384048FF,  0, 0, 0,     EN_DRONE, 2, 8.0f },
 };
 
 const float TOWER_HP[TW_MAXLVL] = { 100, 150, 200 };
@@ -69,96 +78,154 @@ const float TOWER_HP[TW_MAXLVL] = { 100, 150, 200 };
 #define A GATE_AIR
 static const WaveDef WAVES1[] = {
     /* n gates hp x  groups: {type, count, gate, delay, gap} */
-    { 1, 2, 1.00f, { {EN_CRAWLER, 8, C, 0, 1.4f} } },
-    { 2, 2, 1.10f, { {EN_CRAWLER, 10, C, 0, 1.0f}, {EN_GRUNT, 4, C, 7, 2.2f} } },
-    { 2, 4, 1.30f, { {EN_GRUNT, 12, C, 0, 1.2f}, {EN_CRAWLER, 6, R, 8, 0.7f} } },
-    { 2, 4, 1.55f, { {EN_CRAWLER, 24, C, 0, 0.5f}, {EN_WISP, 4, A, 6, 1.5f} } },
-    { 2, 6, 1.85f, { {EN_GRUNT, 14, C, 0, 0.9f}, {EN_BRUTE, 2, C, 5, 6.0f} } },
-    { 2, 6, 2.20f, { {EN_WISP, 10, A, 0, 0.8f}, {EN_CRAWLER, 20, C, 3, 0.4f} } },
-    { 2, 6, 2.60f, { {EN_BRUTE, 4, C, 0, 4.0f}, {EN_GRUNT, 18, C, 2, 0.7f} } },
-    { 3, 6, 3.00f, { {EN_CRAWLER, 30, C, 0, 0.3f}, {EN_WISP, 8, A, 4, 0.7f}, {EN_GRUNT, 10, C, 8, 0.8f} } },
-    { 2, 6, 3.50f, { {EN_BRUTE, 7, C, 0, 2.6f}, {EN_WISP, 10, A, 5, 0.6f} } },
-    { 3, 6, 4.00f, { {EN_GRUNT, 26, C, 0, 0.45f}, {EN_BRUTE, 5, C, 6, 2.5f}, {EN_CRAWLER, 20, R, 10, 0.3f} } },
-    { 3, 6, 4.60f, { {EN_WISP, 16, A, 0, 0.45f}, {EN_BRUTE, 8, C, 3, 2.0f}, {EN_GRUNT, 20, C, 6, 0.5f} } },
-    { 5, 6, 5.00f, { {EN_GOLEM, 1, 0, 4, 1.0f}, {EN_BRUTE, 6, C, 0, 3.0f}, {EN_GRUNT, 24, C, 2, 0.5f},
-                     {EN_WISP, 12, A, 10, 0.6f}, {EN_CRAWLER, 30, R, 16, 0.25f} } },
+    { 1, 2, 1.30f, { {EN_CRAWLER, 8, C, 0, 1.4f} } },
+    { 2, 2, 1.37f, { {EN_CRAWLER, 10, C, 0, 1.0f}, {EN_GRUNT, 4, C, 7, 2.2f} } },
+    { 2, 2, 1.46f, { {EN_CRAWLER, 10, C, 0, 1.0f}, {EN_GRUNT, 4, C, 7, 2.2f} } },
+    { 2, 3, 1.60f, { {EN_GRUNT, 12, C, 0, 1.2f}, {EN_CRAWLER, 6, R, 8, 0.7f} } },
+    { 2, 4, 1.76f, { {EN_GRUNT, 12, C, 0, 1.2f}, {EN_CRAWLER, 6, R, 8, 0.7f} } },
+    { 2, 4, 1.94f, { {EN_CRAWLER, 24, C, 0, 0.5f}, {EN_WISP, 4, A, 6, 1.5f} } },
+    { 2, 5, 2.15f, { {EN_CRAWLER, 24, C, 0, 0.5f}, {EN_WISP, 4, A, 6, 1.5f} } },
+    { 2, 6, 2.36f, { {EN_GRUNT, 14, C, 0, 0.9f}, {EN_BRUTE, 2, C, 5, 6.0f} } },
+    { 2, 6, 2.61f, { {EN_GRUNT, 14, C, 0, 0.9f}, {EN_BRUTE, 2, C, 5, 6.0f} } },
+    { 2, 6, 2.86f, { {EN_WISP, 10, A, 0, 0.8f}, {EN_CRAWLER, 20, C, 3, 0.4f} } },
+    { 2, 6, 3.15f, { {EN_BRUTE, 4, C, 0, 4.0f}, {EN_GRUNT, 18, C, 2, 0.7f} } },
+    { 2, 6, 3.44f, { {EN_BRUTE, 4, C, 0, 4.0f}, {EN_GRUNT, 18, C, 2, 0.7f} } },
+    { 3, 6, 3.73f, { {EN_CRAWLER, 30, C, 0, 0.3f}, {EN_WISP, 8, A, 4, 0.7f}, {EN_GRUNT, 10, C, 8, 0.8f} } },
+    { 3, 6, 4.04f, { {EN_CRAWLER, 30, C, 0, 0.3f}, {EN_WISP, 8, A, 4, 0.7f}, {EN_GRUNT, 10, C, 8, 0.8f} } },
+    { 2, 6, 4.41f, { {EN_BRUTE, 7, C, 0, 2.6f}, {EN_WISP, 10, A, 5, 0.6f} } },
+    { 2, 6, 4.77f, { {EN_BRUTE, 7, C, 0, 2.6f}, {EN_WISP, 10, A, 5, 0.6f} } },
+    { 3, 6, 5.13f, { {EN_GRUNT, 26, C, 0, 0.45f}, {EN_BRUTE, 5, C, 6, 2.5f}, {EN_CRAWLER, 20, R, 10, 0.3f} } },
+    { 3, 6, 5.55f, { {EN_GRUNT, 26, C, 0, 0.45f}, {EN_BRUTE, 5, C, 6, 2.5f}, {EN_CRAWLER, 20, R, 10, 0.3f} } },
+    { 3, 6, 5.98f, { {EN_WISP, 16, A, 0, 0.45f}, {EN_BRUTE, 8, C, 3, 2.0f}, {EN_GRUNT, 20, C, 6, 0.5f} } },
+    { 5, 6, 6.50f, { {EN_GOLEM, 1, 0, 4, 1.0f}, {EN_BRUTE, 6, C, 0, 3.0f}, {EN_GRUNT, 24, C, 2, 0.5f}, {EN_WISP, 12, A, 10, 0.6f}, {EN_CRAWLER, 30, R, 16, 0.25f} } },
 };
 
 /* level 2: new enemies, and the waves start tougher */
 static const WaveDef WAVES2[] = {
     /* n gates hp x  groups: {type, count, gate, delay, gap} */
-    { 2, 2, 1.20f, { {EN_CRAWLER, 6, C, 0, 1.2f}, {EN_SLIME, 3, C, 5, 2.5f} } },
-    { 2, 2, 1.38f, { {EN_FOX, 8, C, 0, 1.4f}, {EN_GRUNT, 4, C, 6, 1.8f} } },
-    { 2, 4, 1.62f, { {EN_BEETLE, 4, C, 0, 2.4f}, {EN_SLIME, 5, C, 4, 1.6f} } },
-    { 2, 4, 1.92f, { {EN_CROW, 6, A, 0, 1.2f}, {EN_FOX, 10, C, 2, 0.9f} } },
-    { 2, 6, 2.28f, { {EN_BEETLE, 7, C, 0, 1.6f}, {EN_GRUNT, 12, C, 3, 0.8f} } },
-    { 2, 6, 2.64f, { {EN_SLIME, 12, C, 0, 0.9f}, {EN_CROW, 8, A, 5, 0.9f} } },
-    { 3, 6, 3.12f, { {EN_BRUTE, 3, C, 0, 4.0f}, {EN_FOX, 16, C, 2, 0.6f}, {EN_BEETLE, 5, C, 8, 1.6f} } },
-    { 3, 6, 3.60f, { {EN_CROW, 12, A, 0, 0.7f}, {EN_SLIME, 12, C, 2, 0.9f}, {EN_BEETLE, 6, C, 6, 1.4f} } },
-    { 2, 6, 4.08f, { {EN_BEETLE, 12, C, 0, 1.1f}, {EN_FOX, 20, R, 4, 0.45f} } },
-    { 3, 6, 4.68f, { {EN_BRUTE, 6, C, 0, 2.6f}, {EN_SLIME, 16, C, 3, 0.7f}, {EN_CROW, 10, A, 8, 0.7f} } },
-    { 3, 6, 5.28f, { {EN_FOX, 26, C, 0, 0.4f}, {EN_BEETLE, 12, C, 4, 1.0f}, {EN_CROW, 14, A, 6, 0.55f} } },
-    { 5, 6, 5.76f, { {EN_PUMPKIN, 1, 0, 4, 1.0f}, {EN_BEETLE, 8, C, 0, 2.2f}, {EN_SLIME, 14, C, 3, 0.8f},
-                     {EN_CROW, 12, A, 10, 0.65f}, {EN_FOX, 24, R, 16, 0.35f} } },
+    { 2, 2, 1.68f, { {EN_CRAWLER, 6, C, 0, 1.2f}, {EN_SLIME, 3, C, 5, 2.5f} } },
+    { 2, 2, 1.82f, { {EN_FOX, 8, C, 0, 1.4f}, {EN_GRUNT, 4, C, 6, 1.8f} } },
+    { 2, 2, 1.97f, { {EN_FOX, 8, C, 0, 1.4f}, {EN_GRUNT, 4, C, 6, 1.8f} } },
+    { 2, 3, 2.16f, { {EN_BEETLE, 4, C, 0, 2.4f}, {EN_SLIME, 5, C, 4, 1.6f} } },
+    { 2, 4, 2.36f, { {EN_BEETLE, 4, C, 0, 2.4f}, {EN_SLIME, 5, C, 4, 1.6f} } },
+    { 2, 4, 2.59f, { {EN_CROW, 6, A, 0, 1.2f}, {EN_FOX, 10, C, 2, 0.9f} } },
+    { 2, 5, 2.86f, { {EN_CROW, 6, A, 0, 1.2f}, {EN_FOX, 10, C, 2, 0.9f} } },
+    { 2, 6, 3.14f, { {EN_BEETLE, 7, C, 0, 1.6f}, {EN_GRUNT, 12, C, 3, 0.8f} } },
+    { 2, 6, 3.42f, { {EN_BEETLE, 7, C, 0, 1.6f}, {EN_GRUNT, 12, C, 3, 0.8f} } },
+    { 2, 6, 3.70f, { {EN_SLIME, 12, C, 0, 0.9f}, {EN_CROW, 8, A, 5, 0.9f} } },
+    { 3, 6, 4.07f, { {EN_BRUTE, 3, C, 0, 4.0f}, {EN_FOX, 16, C, 2, 0.6f}, {EN_BEETLE, 5, C, 8, 1.6f} } },
+    { 3, 6, 4.44f, { {EN_BRUTE, 3, C, 0, 4.0f}, {EN_FOX, 16, C, 2, 0.6f}, {EN_BEETLE, 5, C, 8, 1.6f} } },
+    { 3, 6, 4.82f, { {EN_CROW, 12, A, 0, 0.7f}, {EN_SLIME, 12, C, 2, 0.9f}, {EN_BEETLE, 6, C, 6, 1.4f} } },
+    { 3, 6, 5.19f, { {EN_CROW, 12, A, 0, 0.7f}, {EN_SLIME, 12, C, 2, 0.9f}, {EN_BEETLE, 6, C, 6, 1.4f} } },
+    { 2, 6, 5.56f, { {EN_BEETLE, 12, C, 0, 1.1f}, {EN_FOX, 20, R, 4, 0.45f} } },
+    { 2, 6, 5.99f, { {EN_BEETLE, 12, C, 0, 1.1f}, {EN_FOX, 20, R, 4, 0.45f} } },
+    { 3, 6, 6.46f, { {EN_BRUTE, 6, C, 0, 2.6f}, {EN_SLIME, 16, C, 3, 0.7f}, {EN_CROW, 10, A, 8, 0.7f} } },
+    { 3, 6, 6.93f, { {EN_BRUTE, 6, C, 0, 2.6f}, {EN_SLIME, 16, C, 3, 0.7f}, {EN_CROW, 10, A, 8, 0.7f} } },
+    { 3, 6, 7.39f, { {EN_FOX, 26, C, 0, 0.4f}, {EN_BEETLE, 12, C, 4, 1.0f}, {EN_CROW, 14, A, 6, 0.55f} } },
+    { 5, 6, 8.06f, { {EN_PUMPKIN, 1, 0, 4, 1.0f}, {EN_BEETLE, 8, C, 0, 2.2f}, {EN_SLIME, 14, C, 3, 0.8f}, {EN_CROW, 12, A, 10, 0.65f}, {EN_FOX, 24, R, 16, 0.35f} } },
 };
 
 /* level 3: the dead walk - zombies and gravebreakers smash towers, ghosts fade out of reach, skeletons get back up */
 static const WaveDef WAVES3[] = {
     /* n gates hp x  groups: {type, count, gate, delay, gap} */
-    { 2, 2, 1.09f, { {EN_ZOMBIE, 5, C, 0, 2.4f}, {EN_BAT, 5, A, 8, 0.8f} } },
-    { 2, 2, 1.24f, { {EN_SKELETON, 10, C, 0, 1.2f}, {EN_ZOMBIE, 4, C, 6, 2.0f} } },
-    { 2, 4, 1.43f, { {EN_GHOST, 6, A, 0, 1.6f}, {EN_SKELETON, 8, C, 3, 1.0f} } },
-    { 2, 4, 1.66f, { {EN_ZOMBIE, 10, C, 0, 1.2f}, {EN_BAT, 14, A, 5, 0.35f} } },
-    { 2, 6, 1.94f, { {EN_BREAKER, 2, C, 0, 6.0f}, {EN_SKELETON, 14, C, 2, 0.7f} } },
-    { 2, 6, 2.28f, { {EN_GHOST, 10, A, 0, 1.0f}, {EN_ZOMBIE, 12, C, 2, 0.9f} } },
-    { 3, 6, 2.67f, { {EN_BAT, 20, A, 0, 0.3f}, {EN_SKELETON, 16, C, 2, 0.6f}, {EN_BREAKER, 2, C, 8, 5.0f} } },
-    { 3, 6, 3.09f, { {EN_ZOMBIE, 16, C, 0, 0.7f}, {EN_GHOST, 10, A, 4, 0.8f}, {EN_BEETLE, 6, C, 8, 1.2f} } },
-    { 2, 6, 3.56f, { {EN_BREAKER, 5, C, 0, 3.0f}, {EN_SKELETON, 20, R, 3, 0.45f} } },
-    { 3, 6, 4.09f, { {EN_GHOST, 16, A, 0, 0.6f}, {EN_ZOMBIE, 18, C, 2, 0.6f}, {EN_BAT, 16, A, 8, 0.3f} } },
-    { 3, 6, 4.66f, { {EN_SKELETON, 26, C, 0, 0.4f}, {EN_BREAKER, 6, C, 4, 2.4f}, {EN_GHOST, 12, A, 6, 0.6f} } },
-    { 5, 6, 5.14f, { {EN_GHOULKING, 1, 0, 4, 1.0f}, {EN_ZOMBIE, 14, C, 0, 1.0f}, {EN_SKELETON, 20, C, 3, 0.5f},
-                     {EN_GHOST, 10, A, 10, 0.8f}, {EN_BAT, 12, A, 16, 0.4f} } },
+    { 2, 2, 1.28f, { {EN_ZOMBIE, 5, C, 0, 2.4f}, {EN_BAT, 5, A, 8, 0.8f} } },
+    { 2, 2, 1.37f, { {EN_SKELETON, 10, C, 0, 1.2f}, {EN_ZOMBIE, 4, C, 6, 2.0f} } },
+    { 2, 2, 1.48f, { {EN_SKELETON, 10, C, 0, 1.2f}, {EN_ZOMBIE, 4, C, 6, 2.0f} } },
+    { 2, 3, 1.60f, { {EN_GHOST, 6, A, 0, 1.6f}, {EN_SKELETON, 8, C, 3, 1.0f} } },
+    { 2, 4, 1.73f, { {EN_GHOST, 6, A, 0, 1.6f}, {EN_SKELETON, 8, C, 3, 1.0f} } },
+    { 2, 4, 1.88f, { {EN_ZOMBIE, 10, C, 0, 1.2f}, {EN_BAT, 14, A, 5, 0.35f} } },
+    { 2, 5, 2.05f, { {EN_ZOMBIE, 10, C, 0, 1.2f}, {EN_BAT, 14, A, 5, 0.35f} } },
+    { 2, 6, 2.23f, { {EN_BREAKER, 2, C, 0, 6.0f}, {EN_SKELETON, 14, C, 2, 0.7f} } },
+    { 2, 6, 2.45f, { {EN_BREAKER, 2, C, 0, 6.0f}, {EN_SKELETON, 14, C, 2, 0.7f} } },
+    { 2, 6, 2.67f, { {EN_GHOST, 10, A, 0, 1.0f}, {EN_ZOMBIE, 12, C, 2, 0.9f} } },
+    { 3, 6, 2.92f, { {EN_BAT, 20, A, 0, 0.3f}, {EN_SKELETON, 16, C, 2, 0.6f}, {EN_BREAKER, 2, C, 8, 5.0f} } },
+    { 3, 6, 3.18f, { {EN_BAT, 20, A, 0, 0.3f}, {EN_SKELETON, 16, C, 2, 0.6f}, {EN_BREAKER, 2, C, 8, 5.0f} } },
+    { 3, 6, 3.45f, { {EN_ZOMBIE, 16, C, 0, 0.7f}, {EN_GHOST, 10, A, 4, 0.8f}, {EN_BEETLE, 6, C, 8, 1.2f} } },
+    { 3, 6, 3.74f, { {EN_ZOMBIE, 16, C, 0, 0.7f}, {EN_GHOST, 10, A, 4, 0.8f}, {EN_BEETLE, 6, C, 8, 1.2f} } },
+    { 2, 6, 4.04f, { {EN_BREAKER, 5, C, 0, 3.0f}, {EN_SKELETON, 20, R, 3, 0.45f} } },
+    { 2, 6, 4.37f, { {EN_BREAKER, 5, C, 0, 3.0f}, {EN_SKELETON, 20, R, 3, 0.45f} } },
+    { 3, 6, 4.72f, { {EN_GHOST, 16, A, 0, 0.6f}, {EN_ZOMBIE, 18, C, 2, 0.6f}, {EN_BAT, 16, A, 8, 0.3f} } },
+    { 3, 6, 5.08f, { {EN_GHOST, 16, A, 0, 0.6f}, {EN_ZOMBIE, 18, C, 2, 0.6f}, {EN_BAT, 16, A, 8, 0.3f} } },
+    { 3, 6, 5.45f, { {EN_SKELETON, 26, C, 0, 0.4f}, {EN_BREAKER, 6, C, 4, 2.4f}, {EN_GHOST, 12, A, 6, 0.6f} } },
+    { 5, 6, 6.01f, { {EN_GHOULKING, 1, 0, 4, 1.0f}, {EN_ZOMBIE, 14, C, 0, 1.0f}, {EN_SKELETON, 20, C, 3, 0.5f}, {EN_GHOST, 10, A, 10, 0.8f}, {EN_BAT, 12, A, 16, 0.4f} } },
 };
 
 /* level 4: clockwork - armoured automatons, hopping springers, brass moths that shield, tinkers that repair,
  * sentinels that smash towers, and the Architect, whose shockwave jams towers */
 static const WaveDef WAVES4[] = {
     /* n gates hp x  groups: {type, count, gate, delay, gap} */
-    { 2, 2, 0.89f, { {EN_AUTOMATON, 6, C, 0, 2.0f}, {EN_SPRINGER, 6, C, 6, 1.4f} } },
-    { 2, 2, 1.02f, { {EN_SPRINGER, 12, C, 0, 1.0f}, {EN_TINKER, 3, C, 6, 3.0f} } },
-    { 2, 4, 1.20f, { {EN_MOTH, 4, A, 0, 2.5f}, {EN_AUTOMATON, 10, C, 2, 1.1f} } },
-    { 3, 4, 1.41f, { {EN_TINKER, 5, C, 0, 2.0f}, {EN_SKELETON, 14, C, 2, 0.7f}, {EN_MOTH, 4, A, 8, 2.0f} } },
-    { 2, 6, 1.68f, { {EN_SENTINEL, 2, C, 0, 7.0f}, {EN_AUTOMATON, 12, C, 2, 0.9f} } },
-    { 2, 6, 1.94f, { {EN_SPRINGER, 24, C, 0, 0.5f}, {EN_MOTH, 6, A, 4, 1.2f} } },
-    { 3, 6, 2.30f, { {EN_AUTOMATON, 16, C, 0, 0.7f}, {EN_TINKER, 6, C, 4, 1.8f}, {EN_GHOST, 8, A, 8, 0.9f} } },
-    { 3, 6, 2.66f, { {EN_SENTINEL, 3, C, 0, 5.0f}, {EN_MOTH, 8, A, 3, 1.0f}, {EN_SPRINGER, 20, C, 6, 0.5f} } },
-    { 3, 6, 3.06f, { {EN_AUTOMATON, 20, C, 0, 0.55f}, {EN_TINKER, 8, C, 3, 1.4f}, {EN_BAT, 16, A, 8, 0.3f} } },
-    { 3, 6, 3.50f, { {EN_SENTINEL, 5, C, 0, 3.5f}, {EN_MOTH, 10, A, 2, 0.8f}, {EN_SKELETON, 20, C, 6, 0.45f} } },
-    { 4, 6, 3.99f, { {EN_SPRINGER, 30, C, 0, 0.35f}, {EN_AUTOMATON, 16, C, 3, 0.7f}, {EN_MOTH, 10, A, 8, 0.7f}, {EN_TINKER, 6, C, 10, 2.0f} } },
-    { 5, 6, 4.43f, { {EN_ARCHITECT, 1, 0, 4, 1.0f}, {EN_AUTOMATON, 14, C, 0, 1.0f}, {EN_TINKER, 6, C, 6, 2.5f},
-                     {EN_MOTH, 10, A, 10, 0.9f}, {EN_SPRINGER, 24, R, 16, 0.4f} } },
+    { 2, 2, 1.16f, { {EN_AUTOMATON, 6, C, 0, 2.0f}, {EN_SPRINGER, 6, C, 6, 1.4f} } },
+    { 2, 2, 1.25f, { {EN_SPRINGER, 12, C, 0, 1.0f}, {EN_TINKER, 3, C, 6, 3.0f} } },
+    { 2, 2, 1.35f, { {EN_SPRINGER, 12, C, 0, 1.0f}, {EN_TINKER, 3, C, 6, 3.0f} } },
+    { 2, 3, 1.48f, { {EN_MOTH, 4, A, 0, 2.5f}, {EN_AUTOMATON, 10, C, 2, 1.1f} } },
+    { 2, 4, 1.62f, { {EN_MOTH, 4, A, 0, 2.5f}, {EN_AUTOMATON, 10, C, 2, 1.1f} } },
+    { 3, 4, 1.77f, { {EN_TINKER, 5, C, 0, 2.0f}, {EN_SKELETON, 14, C, 2, 0.7f}, {EN_MOTH, 4, A, 8, 2.0f} } },
+    { 3, 5, 1.95f, { {EN_TINKER, 5, C, 0, 2.0f}, {EN_SKELETON, 14, C, 2, 0.7f}, {EN_MOTH, 4, A, 8, 2.0f} } },
+    { 2, 6, 2.15f, { {EN_SENTINEL, 2, C, 0, 7.0f}, {EN_AUTOMATON, 12, C, 2, 0.9f} } },
+    { 2, 6, 2.33f, { {EN_SENTINEL, 2, C, 0, 7.0f}, {EN_AUTOMATON, 12, C, 2, 0.9f} } },
+    { 2, 6, 2.52f, { {EN_SPRINGER, 24, C, 0, 0.5f}, {EN_MOTH, 6, A, 4, 1.2f} } },
+    { 3, 6, 2.78f, { {EN_AUTOMATON, 16, C, 0, 0.7f}, {EN_TINKER, 6, C, 4, 1.8f}, {EN_GHOST, 8, A, 8, 0.9f} } },
+    { 3, 6, 3.04f, { {EN_AUTOMATON, 16, C, 0, 0.7f}, {EN_TINKER, 6, C, 4, 1.8f}, {EN_GHOST, 8, A, 8, 0.9f} } },
+    { 3, 6, 3.30f, { {EN_SENTINEL, 3, C, 0, 5.0f}, {EN_MOTH, 8, A, 3, 1.0f}, {EN_SPRINGER, 20, C, 6, 0.5f} } },
+    { 3, 6, 3.57f, { {EN_SENTINEL, 3, C, 0, 5.0f}, {EN_MOTH, 8, A, 3, 1.0f}, {EN_SPRINGER, 20, C, 6, 0.5f} } },
+    { 3, 6, 3.86f, { {EN_AUTOMATON, 20, C, 0, 0.55f}, {EN_TINKER, 8, C, 3, 1.4f}, {EN_BAT, 16, A, 8, 0.3f} } },
+    { 3, 6, 4.17f, { {EN_AUTOMATON, 20, C, 0, 0.55f}, {EN_TINKER, 8, C, 3, 1.4f}, {EN_BAT, 16, A, 8, 0.3f} } },
+    { 3, 6, 4.49f, { {EN_SENTINEL, 5, C, 0, 3.5f}, {EN_MOTH, 10, A, 2, 0.8f}, {EN_SKELETON, 20, C, 6, 0.45f} } },
+    { 3, 6, 4.83f, { {EN_SENTINEL, 5, C, 0, 3.5f}, {EN_MOTH, 10, A, 2, 0.8f}, {EN_SKELETON, 20, C, 6, 0.45f} } },
+    { 4, 6, 5.19f, { {EN_SPRINGER, 30, C, 0, 0.35f}, {EN_AUTOMATON, 16, C, 3, 0.7f}, {EN_MOTH, 10, A, 8, 0.7f}, {EN_TINKER, 6, C, 10, 2.0f} } },
+    { 5, 6, 5.76f, { {EN_ARCHITECT, 1, 0, 4, 1.0f}, {EN_AUTOMATON, 14, C, 0, 1.0f}, {EN_TINKER, 6, C, 6, 2.5f}, {EN_MOTH, 10, A, 10, 0.9f}, {EN_SPRINGER, 24, R, 16, 0.4f} } },
 };
 
 /* level 5: the pirates come for the treasure - rowboats, sharks that dive out of reach, skull pirates that pull
  * themselves back together, parrots, pirate ships whose broadsides jam towers, and the Kraken */
 static const WaveDef WAVES5[] = {
     /* n gates hp x  groups: {type, count, gate, delay, gap} */
-    { 2, 2, 0.72f, { {EN_ROWBOAT, 8, C, 0, 2.2f}, {EN_PARROT, 4, A, 14, 1.5f} } },
-    { 2, 2, 0.81f, { {EN_SHARK, 10, C, 0, 1.2f}, {EN_ROWBOAT, 4, C, 6, 2.0f} } },
-    { 2, 4, 0.90f, { {EN_SKULLPIRATE, 10, C, 0, 1.2f}, {EN_PARROT, 8, A, 4, 0.8f} } },
-    { 2, 4, 1.02f, { {EN_ROWBOAT, 12, C, 0, 1.0f}, {EN_SHARK, 8, C, 6, 1.0f} } },
-    { 2, 6, 1.18f, { {EN_SHIP, 1, C, 0, 1.0f}, {EN_SKULLPIRATE, 12, C, 2, 0.8f} } },
-    { 2, 6, 1.37f, { {EN_PARROT, 18, A, 0, 0.4f}, {EN_SHARK, 14, C, 2, 0.7f} } },
-    { 2, 8, 1.67f, { {EN_SHIP, 2, C, 0, 7.0f}, {EN_ROWBOAT, 14, C, 2, 0.8f} } },
-    { 3, 8, 1.98f, { {EN_SKULLPIRATE, 18, C, 0, 0.6f}, {EN_SHARK, 12, C, 4, 0.7f}, {EN_PARROT, 10, A, 8, 0.6f} } },
-    { 2, 8, 2.33f, { {EN_ROWBOAT, 20, C, 0, 0.6f}, {EN_SHIP, 2, C, 4, 6.0f} } },
-    { 3, 8, 2.73f, { {EN_SHARK, 24, C, 0, 0.45f}, {EN_SKULLPIRATE, 14, C, 4, 0.7f}, {EN_PARROT, 14, A, 8, 0.5f} } },
-    { 3, 8, 3.17f, { {EN_SHIP, 4, C, 0, 4.0f}, {EN_ROWBOAT, 16, C, 2, 0.7f}, {EN_PARROT, 12, A, 6, 0.6f} } },
-    { 3, 8, 3.65f, { {EN_SKULLPIRATE, 26, C, 0, 0.45f}, {EN_SHARK, 20, C, 3, 0.5f}, {EN_SHIP, 2, C, 10, 6.0f} } },
-    { 4, 8, 4.14f, { {EN_ROWBOAT, 24, C, 0, 0.5f}, {EN_SHIP, 4, C, 3, 3.5f}, {EN_PARROT, 16, A, 6, 0.5f}, {EN_SHARK, 16, R, 10, 0.5f} } },
-    { 3, 8, 4.58f, { {EN_SHIP, 6, C, 0, 3.0f}, {EN_SKULLPIRATE, 24, C, 2, 0.5f}, {EN_SHARK, 20, R, 6, 0.4f} } },
-    { 6, 8, 4.75f, { {EN_KRAKEN, 1, 0, 4, 1.0f}, {EN_SHIP, 3, C, 0, 6.0f}, {EN_ROWBOAT, 16, C, 4, 0.8f},
-                     {EN_SKULLPIRATE, 20, C, 8, 0.5f}, {EN_PARROT, 16, A, 12, 0.5f}, {EN_SHARK, 20, R, 16, 0.4f} } },
+    { 2, 2, 0.83f, { {EN_ROWBOAT, 8, C, 0, 2.2f}, {EN_PARROT, 4, A, 14, 1.5f} } },
+    { 2, 2, 0.90f, { {EN_SHARK, 10, C, 0, 1.2f}, {EN_ROWBOAT, 4, C, 6, 2.0f} } },
+    { 2, 3, 0.98f, { {EN_SHARK, 10, C, 0, 1.2f}, {EN_ROWBOAT, 4, C, 6, 2.0f} } },
+    { 2, 4, 1.06f, { {EN_SKULLPIRATE, 10, C, 0, 1.2f}, {EN_PARROT, 8, A, 4, 0.8f} } },
+    { 2, 4, 1.16f, { {EN_ROWBOAT, 12, C, 0, 1.0f}, {EN_SHARK, 8, C, 6, 1.0f} } },
+    { 2, 5, 1.29f, { {EN_SHIP, 1, C, 0, 1.0f}, {EN_SKULLPIRATE, 12, C, 2, 0.8f} } },
+    { 2, 6, 1.43f, { {EN_SHIP, 1, C, 0, 1.0f}, {EN_SKULLPIRATE, 12, C, 2, 0.8f} } },
+    { 2, 6, 1.59f, { {EN_PARROT, 18, A, 0, 0.4f}, {EN_SHARK, 14, C, 2, 0.7f} } },
+    { 2, 8, 1.84f, { {EN_SHIP, 2, C, 0, 7.0f}, {EN_ROWBOAT, 14, C, 2, 0.8f} } },
+    { 3, 8, 2.10f, { {EN_SKULLPIRATE, 18, C, 0, 0.6f}, {EN_SHARK, 12, C, 4, 0.7f}, {EN_PARROT, 10, A, 8, 0.6f} } },
+    { 3, 8, 2.37f, { {EN_SKULLPIRATE, 18, C, 0, 0.6f}, {EN_SHARK, 12, C, 4, 0.7f}, {EN_PARROT, 10, A, 8, 0.6f} } },
+    { 2, 8, 2.66f, { {EN_ROWBOAT, 20, C, 0, 0.6f}, {EN_SHIP, 2, C, 4, 6.0f} } },
+    { 3, 8, 2.99f, { {EN_SHARK, 24, C, 0, 0.45f}, {EN_SKULLPIRATE, 14, C, 4, 0.7f}, {EN_PARROT, 14, A, 8, 0.5f} } },
+    { 3, 8, 3.34f, { {EN_SHARK, 24, C, 0, 0.45f}, {EN_SKULLPIRATE, 14, C, 4, 0.7f}, {EN_PARROT, 14, A, 8, 0.5f} } },
+    { 3, 8, 3.71f, { {EN_SHIP, 4, C, 0, 4.0f}, {EN_ROWBOAT, 16, C, 2, 0.7f}, {EN_PARROT, 12, A, 6, 0.6f} } },
+    { 3, 8, 4.11f, { {EN_SKULLPIRATE, 26, C, 0, 0.45f}, {EN_SHARK, 20, C, 3, 0.5f}, {EN_SHIP, 2, C, 10, 6.0f} } },
+    { 4, 8, 4.51f, { {EN_ROWBOAT, 24, C, 0, 0.5f}, {EN_SHIP, 4, C, 3, 3.5f}, {EN_PARROT, 16, A, 6, 0.5f}, {EN_SHARK, 16, R, 10, 0.5f} } },
+    { 4, 8, 4.90f, { {EN_ROWBOAT, 24, C, 0, 0.5f}, {EN_SHIP, 4, C, 3, 3.5f}, {EN_PARROT, 16, A, 6, 0.5f}, {EN_SHARK, 16, R, 10, 0.5f} } },
+    { 3, 8, 5.27f, { {EN_SHIP, 6, C, 0, 3.0f}, {EN_SKULLPIRATE, 24, C, 2, 0.5f}, {EN_SHARK, 20, R, 6, 0.4f} } },
+    { 6, 8, 5.46f, { {EN_KRAKEN, 1, 0, 4, 1.0f}, {EN_SHIP, 3, C, 0, 6.0f}, {EN_ROWBOAT, 16, C, 4, 0.8f}, {EN_SKULLPIRATE, 20, C, 8, 0.5f}, {EN_PARROT, 16, A, 12, 0.5f}, {EN_SHARK, 20, R, 16, 0.4f} } },
+};
+
+/* level 6: visitors from the future - hoverboarders, drones, armoured servo bots, holographic sharks that flicker out
+ * of reach, paradoxes that split into echoes, hover cars whose sonic booms jam towers, and the Time Train */
+static const WaveDef WAVES6[] = {
+    /* n gates hp x  groups: {type, count, gate, delay, gap} */
+    { 2, 2, 0.98f, { {EN_HOVERBOARD, 8, C, 0, 1.6f}, {EN_SERVO, 2, C, 10, 3.0f} } },
+    { 2, 2, 1.07f, { {EN_DRONE, 8, A, 0, 1.2f}, {EN_HOVERBOARD, 6, C, 5, 1.4f} } },
+    { 2, 3, 1.17f, { {EN_SERVO, 6, C, 0, 2.0f}, {EN_HOVERBOARD, 8, C, 6, 1.0f} } },
+    { 2, 4, 1.28f, { {EN_PARADOX, 6, C, 0, 1.8f}, {EN_DRONE, 6, A, 6, 1.0f} } },
+    { 2, 4, 1.42f, { {EN_HOLOSHARK, 8, C, 0, 1.4f}, {EN_SERVO, 4, C, 6, 2.0f} } },
+    { 2, 5, 1.56f, { {EN_HOVERCAR, 1, C, 0, 1.0f}, {EN_HOVERBOARD, 14, C, 2, 0.7f} } },
+    { 3, 6, 1.73f, { {EN_PARADOX, 10, C, 0, 1.0f}, {EN_DRONE, 10, A, 4, 0.7f}, {EN_SERVO, 4, C, 8, 2.0f} } },
+    { 2, 6, 1.93f, { {EN_HOLOSHARK, 14, C, 0, 0.8f}, {EN_HOVERBOARD, 12, C, 4, 0.6f} } },
+    { 2, 8, 2.17f, { {EN_HOVERCAR, 2, C, 0, 6.0f}, {EN_SERVO, 10, C, 2, 1.0f} } },
+    { 3, 8, 2.44f, { {EN_PARADOX, 14, C, 0, 0.7f}, {EN_HOLOSHARK, 10, C, 4, 0.8f}, {EN_DRONE, 12, A, 8, 0.6f} } },
+    { 3, 8, 2.73f, { {EN_HOVERBOARD, 24, C, 0, 0.4f}, {EN_SERVO, 10, C, 3, 0.9f}, {EN_HOVERCAR, 1, C, 10, 1.0f} } },
+    { 3, 8, 3.05f, { {EN_HOLOSHARK, 18, C, 0, 0.6f}, {EN_DRONE, 16, A, 3, 0.5f}, {EN_PARADOX, 8, C, 8, 1.0f} } },
+    { 2, 8, 3.42f, { {EN_HOVERCAR, 3, C, 0, 5.0f}, {EN_HOVERBOARD, 20, C, 2, 0.5f} } },
+    { 3, 8, 3.81f, { {EN_SERVO, 18, C, 0, 0.6f}, {EN_PARADOX, 12, C, 4, 0.7f}, {EN_DRONE, 14, A, 8, 0.5f} } },
+    { 3, 8, 4.22f, { {EN_HOLOSHARK, 22, C, 0, 0.45f}, {EN_HOVERCAR, 2, C, 3, 6.0f}, {EN_HOVERBOARD, 16, R, 8, 0.5f} } },
+    { 4, 8, 4.68f, { {EN_PARADOX, 18, C, 0, 0.5f}, {EN_SERVO, 14, C, 3, 0.7f}, {EN_DRONE, 18, A, 6, 0.45f}, {EN_HOVERCAR, 2, C, 10, 5.0f} } },
+    { 3, 8, 5.17f, { {EN_HOVERCAR, 5, C, 0, 3.5f}, {EN_HOLOSHARK, 20, C, 2, 0.5f}, {EN_HOVERBOARD, 20, R, 6, 0.4f} } },
+    { 4, 8, 5.71f, { {EN_SERVO, 22, C, 0, 0.5f}, {EN_PARADOX, 18, C, 3, 0.5f}, {EN_DRONE, 20, A, 6, 0.4f}, {EN_HOLOSHARK, 16, R, 10, 0.5f} } },
+    { 3, 8, 6.27f, { {EN_HOVERCAR, 7, C, 0, 2.8f}, {EN_HOVERBOARD, 28, C, 2, 0.35f}, {EN_PARADOX, 16, R, 6, 0.5f} } },
+    { 6, 8, 6.59f, { {EN_TIMETRAIN, 1, 0, 4, 1.0f}, {EN_HOVERCAR, 3, C, 0, 6.0f}, {EN_SERVO, 16, C, 4, 0.8f}, {EN_PARADOX, 16, C, 8, 0.6f}, {EN_DRONE, 16, A, 12, 0.5f}, {EN_HOLOSHARK, 20, R, 16, 0.45f} } },
 };
 #undef C
 #undef R
@@ -271,6 +338,31 @@ const LevelDef LEVELS[] = {
         8, { {5, 0}, {20, 16}, {26, 4}, {0, 12}, {21, 0}, {6, 16}, {26, 13}, {0, 3} },
         WAVES5, NW(WAVES5), ENV_PIRATE, 340,
     },
+    {   "88 MPH", "GREAT SCOTT! THE TIME TRAIN!",
+        {   /* a town square at night: streets for the visitors from the future, sidewalks and tech crates to build on,
+             * the clock tower up top, and the time machine parked in the middle */
+            "TTTT.TTTTTTTTTTTTTTTTT.TTTT",
+            "Trc#.######,pp,g######.#m,T",
+            "T,r#......#m,C,p#......#b,T",
+            "T##L#####.#m,op,#.#####L##T",
+            "...#,rc,#.L#####L.#gr,c#...",
+            "T#.#r,cc#.........#,r,c#.#T",
+            "T#.#g,rr#####.#####,gg,#.#T",
+            "T#.#########FFF#########.#T",
+            "T#..........FFF..........#T",
+            "TL######.###FFF###.######LT",
+            "Tb,#.....#,##.##,#.....#,gT",
+            "T###.######L#.#L######.###T",
+            ".....#,o,#.......#b,m#.....",
+            "T######L##.#####.##L######T",
+            "T,yy,#.....#,gr#.....#m,ooT",
+            "Tc,y,#.#####g,r#####.#mm,oT",
+            "TTTTTT.TTTTTTTTTTTTT.TTTTTT",
+        },
+        /* N, S, E, W, NE, SW, SE, far W */
+        8, { {4, 0}, {20, 16}, {26, 4}, {0, 12}, {22, 0}, {6, 16}, {26, 12}, {0, 4} },
+        WAVES6, NW(WAVES6), ENV_FUTURE, 360,
+    },
 };
 const int NUM_LEVELS = NW(LEVELS);
 
@@ -303,6 +395,8 @@ void map_load(Game *g)
             case 'R': t->kind = TL_GRAVE; t->color = DECO_RUNE; break;
             case 'S': t->kind = TL_GRAVE; t->color = DECO_WRECK; break;
             case 'W': t->kind = TL_GRAVE; t->color = DECO_WATER; break;
+            case 'C': t->kind = TL_GRAVE; t->color = DECO_CLOCK; break;
+            case 'L': t->kind = TL_GRAVE; t->color = DECO_LAMP; break;
             case 't': t->kind = TL_WALL; t->torch = 1; t->h = 0.5f; break;
             case '#': t->kind = TL_WALL; t->h = 0.5f; break;
             default: {
@@ -311,6 +405,10 @@ void map_load(Game *g)
                 for (int i = 0; i < BC_COUNT; i++) if (cols[i] == ch) t->color = (uint8_t)i;
                 break;
             }
+            }
+            if (g->lv->env == ENV_FUTURE) {             /* low kerbs and crates in the town square */
+                if (t->kind == TL_WALL) t->h = 0.2f;
+                else if (t->kind == TL_BLOCK) t->h = 0.42f;
             }
             /* a few puddles on the paths and the grass */
             uint32_t hsh = (uint32_t)(r * 7919 + c * 104729) * 2654435761u;

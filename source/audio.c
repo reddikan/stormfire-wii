@@ -6,7 +6,6 @@
  * rolling thunder and a sharp lightning crack.
  */
 #include "audio.h"
-#include "speech.h"
 
 #include <math.h>
 #include <string.h>
@@ -17,8 +16,10 @@
 
 #define MAXLEN 80000                       /* 2.5 s per effect at 32 kHz, a multiple of 16 so rows stay 32-byte aligned */
 
-static int16_t SFX[SFX_COUNT][MAXLEN] __attribute__((aligned(32)));
-static int     sfx_len[SFX_COUNT];
+/* every effect lives back to back in one pool (each start 32-byte aligned), sized to what they really need */
+#define SFX_POOL 1600000
+static int16_t SFXPOOL[SFX_POOL] __attribute__((aligned(32)));
+static int     sfx_off[SFX_COUNT], sfx_len[SFX_COUNT], pool_used;
 static float   mixbuf[MAXLEN];
 static float   outbuf[MAXLEN];
 static int     mixend;
@@ -32,7 +33,9 @@ static const uint8_t VOL[SFX_COUNT] = {
     /* MOVE */ 60,     /* SELECT */ 120, /* WAVE */ 200,   /* CLEAR */ 200,  /* HISS */ 200,   /* THUNDER */ 255,
     /* CRACK */ 230,   /* BOSS */ 240,   /* WIN */ 220,    /* LOSE */ 220,   /* PAUSE */ 120,  /* START */ 200,
     /* COIN */ 170,    /* GUST */ 150,   /* CANNON */ 220, /* SPLASH */ 160,
-    /* voices */ 235, 235, 235, 230, 235, 235, 235
+    /* pinball: BUMPER */ 130, /* KICKER */ 170, /* FLIPPER */ 170, /* COMBO */ 190, /* DROP */ 170, /* BUZZ */ 150,
+    /* TICK */ 70, /* DING */ 150, /* LAUNCH */ 210, /* JACKPOT */ 220, /* TILT */ 210, /* SCOTT */ 210, /* WIN */ 230,
+    /* DRAIN */ 220, /* WARP */ 150, /* SURGE */ 240, /* GIGA */ 240
 };
 
 /* ------------------------------------------------------------------ */
@@ -185,11 +188,15 @@ static void finish_fx(int id, float wet, float room)
     float scale = peak > 0.0f ? 0.85f * 32000.0f / peak : 0.0f;
     int outlen = (len + 15) & ~15;
     if (outlen > MAXLEN) outlen = MAXLEN;
-    memset(SFX[id], 0, sizeof SFX[id]);
-    for (int i = 0; i < len && i < MAXLEN; i++) {
+    if (pool_used + outlen > SFX_POOL) { sfx_off[id] = 0; sfx_len[id] = 16; return; }   /* (cannot happen: the pool has room) */
+    int16_t *dst = &SFXPOOL[pool_used];
+    sfx_off[id] = pool_used;
+    pool_used += outlen;
+    memset(dst, 0, (size_t)outlen * sizeof *dst);
+    for (int i = 0; i < len && i < outlen; i++) {
         float x = outbuf[i];
         if (len - i < fade) x *= (float)(len - i) / (float)fade;
-        SFX[id][i] = (int16_t)(x * scale);
+        dst[i] = (int16_t)(x * scale);
     }
     sfx_len[id] = outlen;
 }
@@ -218,25 +225,6 @@ static void bell(float t, float f, float vol, float tau)
     tone(t, tau * 3.0f, f * 2.0f, f * 2.0f, vol * 0.25f, 0.002f, tau * 0.5f, W_SIN, 0, 0);
 }
 
-
-/* a pirate shouting through an old arcade speech chip: formant speech, then band-limited, sample-and-held at
- * ~10 kHz and quantised a little for that crunchy cabinet sound */
-static void voice(int id, const char *phrase, float pitch, float rate, float growl)
-{
-    begin();
-    int n = speech_render(phrase, pitch, rate, growl, mixbuf, MAXLEN - 2000, SR);
-    float l1 = 0, l2 = 0, held = 0, peak = 1e-6f, prev = 0;
-    for (int i = 0; i < n; i++) { float x = mixbuf[i]; mixbuf[i] = x - 0.88f * prev; prev = x; }   /* brighter, buzzier: easier to make out */
-    for (int i = 0; i < n; i++) if (fabsf(mixbuf[i]) > peak) peak = fabsf(mixbuf[i]);
-    for (int i = 0; i < n; i++) {
-        float x = mixbuf[i] / peak;
-        l1 += (x - l1) * 0.5f; l2 += (l1 - l2) * 0.5f;            /* ~5 kHz low-pass */
-        if ((i & 1) == 0) held = floorf(l2 * 400.0f + 0.5f) / 400.0f;  /* 16 kHz, ~9.5 bits */
-        mixbuf[i] = held;
-    }
-    mixend = n;
-    finish_fx(id, 0.12f, 0.2f);
-}
 
 void audio_init(void)
 {
@@ -398,14 +386,128 @@ void audio_init(void)
     tone(0.0f, 0.3f, 180, 50, 0.6f, 0.001f, 0.1f, W_SIN, 0, 0);
     finish_fx(SFX_CRACK, 0.3f, 0.5f);
 
-    /* --- pirate voices --- */
-    voice(SFX_V_ARR_MATEY, "AA^ RR _ M EY^ T IY", 1.0f, 1.0f, 0.8f);
-    voice(SFX_V_SHIVER,    "SH IH^ V ER M IY T IH^ M B ER Z", 1.0f, 1.0f, 0.5f);
-    voice(SFX_V_YOHOHO,    "Y OW^ _ HH OW^ _ HH OW^", 1.15f, 1.0f, 0.4f);
-    voice(SFX_V_HARHAR,    "HH AA^ R _ HH AA^ R _ HH AA^ RR", 1.05f, 0.75f, 0.7f);
-    voice(SFX_V_PLANK,     "W AO^ K DH AX P L AE^ NG K", 1.0f, 1.0f, 0.5f);
-    voice(SFX_V_ARR,       "AA^ RR", 0.95f, 1.1f, 1.0f);
-    voice(SFX_V_AVAST,     "AX V AE^ S T _ Y IY", 1.0f, 1.0f, 0.5f);
+    /* --- level 6: a pinball machine --- */
+    begin();                                                         /* pop bumper: a solenoid thwack and a bright ding */
+    tone(0, 0.08f, 200, 80, 0.9f, 0.001f, 0.03f, W_SIN, 0, 0);
+    noise(0, 0.03f, 2500, 1500, 1.2f, 0.6f, 0.001f, 0.01f, F_BP);
+    bell(0.005f, 1568.0f, 0.4f, 0.07f);
+    finish_fx(SFX_PB_BUMPER, 0.1f, 0.1f);
+
+    begin();                                                         /* kicker: a heavier thunk, a lower ding */
+    tone(0, 0.14f, 150, 55, 1.0f, 0.001f, 0.05f, W_SIN, 0, 0);
+    noise(0, 0.06f, 1800, 600, 1.0f, 0.8f, 0.001f, 0.02f, F_BP);
+    bell(0.01f, 1047.0f, 0.45f, 0.1f);
+    finish_fx(SFX_PB_KICKER, 0.15f, 0.15f);
+
+    begin();                                                         /* flipper: clack-clack of the coil */
+    noise(0, 0.035f, 1600, 900, 1.6f, 1.0f, 0.001f, 0.012f, F_BP);
+    tone(0, 0.07f, 140, 70, 0.7f, 0.001f, 0.025f, W_SIN, 0, 0);
+    noise(0.07f, 0.03f, 2200, 1200, 1.6f, 0.6f, 0.001f, 0.01f, F_BP);
+    bell(0.08f, 2093.0f, 0.25f, 0.06f);
+    finish_fx(SFX_PB_FLIPPER, 0.1f, 0.1f);
+
+    begin();                                                         /* combo: a fast rising chime run */
+    for (int i = 0; i < 6; i++) {
+        static const float nf[6] = {C6, E6, G6, C7, E6 * 2.0f, G6 * 2.0f};
+        bell(0.05f * (float)i, nf[i], 0.35f, 0.07f);
+    }
+    finish_fx(SFX_PB_COMBO, 0.25f, 0.2f);
+
+    begin();                                                         /* drop target: clack and a falling blip */
+    noise(0, 0.04f, 1400, 800, 1.4f, 1.0f, 0.001f, 0.012f, F_BP);
+    tone(0.02f, 0.18f, 1400, 300, 0.4f, 0.002f, 0.06f, W_TRI, 0, 0);
+    finish_fx(SFX_PB_DROP, 0.1f, 0.1f);
+
+    begin();                                                         /* buzzer */
+    tone(0, 0.26f, 110, 108, 0.7f, 0.002f, 0, W_SOFT, 0.0f, 0);
+    tone(0, 0.26f, 165, 163, 0.35f, 0.002f, 0, W_SOFT, 0.0f, 0);
+    finish_fx(SFX_PB_BUZZ, 0.0f, 0.0f);
+
+    begin();                                                         /* relay tick */
+    noise(0, 0.012f, 4000, 3000, 1.5f, 1.0f, 0.0005f, 0.004f, F_BP);
+    finish_fx(SFX_PB_TICK, 0.0f, 0.0f);
+
+    begin();                                                         /* ding */
+    bell(0, 2093.0f, 0.5f, 0.12f);
+    bell(0.002f, 2637.0f, 0.2f, 0.08f);
+    finish_fx(SFX_PB_DING, 0.2f, 0.2f);
+
+    begin();                                                         /* plunger launch: spring boing, a whoosh up the lane, a ding */
+    tone(0, 0.35f, 320, 120, 0.7f, 0.002f, 0.12f, W_FM, 1.5f, 3.0f);
+    noise(0.08f, 0.35f, 400, 4000, 1.0f, 0.6f, 0.05f, 0.12f, F_BP);
+    tone(0.08f, 0.35f, 200, 900, 0.25f, 0.02f, 0.15f, W_TRI, 0, 0);
+    bell(0.42f, 1568.0f, 0.4f, 0.1f);
+    bell(0.5f, 2093.0f, 0.4f, 0.14f);
+    finish_fx(SFX_PB_LAUNCH, 0.25f, 0.3f);
+
+    begin();                                                         /* jackpot: bells ringing up and the score tallying */
+    for (int r = 0; r < 2; r++)
+        for (int i = 0; i < 4; i++) {
+            static const float nf[4] = {C6, E6, G6, C7};
+            bell(0.3f * (float)r + 0.07f * (float)i, nf[i] * (r ? 1.0f : 0.5f) * 2.0f, 0.35f, 0.12f);
+        }
+    for (int i = 0; i < 14; i++) noise(0.62f + 0.04f * (float)i, 0.012f, 4000, 3000, 1.5f, 0.35f, 0.0005f, 0.004f, F_BP);
+    bell(0.62f, C7, 0.5f, 0.35f);
+    tone(0.62f, 0.8f, C5, C5, 0.25f, 0.01f, 0.35f, W_FM, 2.0f, 1.0f);
+    tone(0.62f, 0.8f, G5, G5, 0.2f, 0.01f, 0.35f, W_FM, 2.0f, 1.0f);
+    finish_fx(SFX_PB_JACKPOT, 0.3f, 0.4f);
+
+    begin();                                                         /* TILT: a nasty double buzz and a clank */
+    tone(0, 0.22f, 90, 88, 0.8f, 0.002f, 0, W_SOFT, 0.0f, 0);
+    tone(0.3f, 0.3f, 90, 86, 0.8f, 0.002f, 0, W_SOFT, 0.0f, 0);
+    noise(0, 0.08f, 1200, 400, 1.0f, 0.7f, 0.001f, 0.03f, F_BP);
+    finish_fx(SFX_PB_TILT, 0.1f, 0.2f);
+
+    begin();                                                         /* boss: an alarm klaxon */
+    for (int i = 0; i < 3; i++) {
+        tone(0.4f * (float)i, 0.2f, 620, 600, 0.6f, 0.01f, 0, W_SOFT, 0.3f, 0);
+        tone(0.4f * (float)i + 0.2f, 0.2f, 470, 450, 0.6f, 0.01f, 0, W_SOFT, 0.3f, 0);
+    }
+    tone(0, 1.3f, 55, 50, 0.6f, 0.05f, 0.7f, W_SOFT, 0.5f, 0);
+    finish_fx(SFX_PB_SCOTT, 0.2f, 0.4f);
+
+    begin();                                                         /* win: a long run of bells over a fanfare */
+    for (int i = 0; i < 12; i++) {
+        static const float nf[4] = {C6, E6, G6, C7};
+        bell(0.08f * (float)i, nf[i & 3] * (i >= 8 ? 2.0f : 1.0f), 0.3f, 0.12f);
+    }
+    for (int i = 0; i < 4; i++) {
+        static const float nf[4] = {C5, E5, G5, C6};
+        tone(0.96f, 1.1f, nf[i], nf[i], 0.22f, 0.01f, 0.5f, W_FM, 2.0f, 1.0f);
+    }
+    finish_fx(SFX_PB_WIN, 0.3f, 0.5f);
+
+    begin();                                                         /* drain: wah... wah... wahhh */
+    for (int i = 0; i < 3; i++) {
+        float f0 = 392.0f * powf(0.89f, (float)i);
+        tone(0.32f * (float)i, i == 2 ? 0.9f : 0.3f, f0, f0 * (i == 2 ? 0.7f : 0.95f), 0.5f, 0.01f, i == 2 ? 0.5f : 0.15f, W_FM, 1.0f, 2.5f);
+    }
+    finish_fx(SFX_PB_DRAIN, 0.2f, 0.4f);
+
+    begin();                                                         /* time warp: a rising whoosh into a sonic boom */
+    noise(0, 0.32f, 200, 5000, 1.5f, 0.6f, 0.2f, 0.1f, F_BP);
+    tone(0, 0.32f, 90, 1600, 0.35f, 0.15f, 0.1f, W_FM, 2.0f, 2.0f);
+    tone(0.3f, 0.35f, 120, 40, 0.9f, 0.001f, 0.1f, W_SIN, 0, 0);
+    noise(0.3f, 0.3f, 2000, 200, 0.8f, 0.8f, 0.001f, 0.08f, F_LP);
+    finish_fx(SFX_PB_WARP, 0.15f, 0.3f);
+
+    begin();                                                         /* time surge: whoosh, zap, boom and bells */
+    noise(0, 0.6f, 150, 6000, 1.2f, 0.6f, 0.35f, 0.2f, F_BP);
+    tone(0, 0.6f, 60, 2000, 0.3f, 0.3f, 0.2f, W_FM, 1.5f, 3.0f);
+    tone(0.55f, 0.8f, 110, 30, 1.0f, 0.001f, 0.25f, W_SIN, 0, 0);
+    noise(0.55f, 0.7f, 2500, 150, 0.7f, 0.8f, 0.001f, 0.2f, F_LP);
+    for (int i = 0; i < 5; i++) noise(0.55f + 0.04f * (float)i, 0.03f, 6000, 3000, 1.0f, 0.5f, 0.001f, 0.01f, F_HP);
+    for (int i = 0; i < 6; i++) bell(0.65f + 0.06f * (float)i, (float[]){C6, E6, G6, C7, G6, C7}[i], 0.35f, 0.12f);
+    finish_fx(SFX_PB_SURGE, 0.3f, 0.5f);
+
+    begin();                                                         /* 1.21 gigawatts: crackle, a rising power-up chord, bells */
+    for (int i = 0; i < 8; i++) noise(0.03f * (float)i, 0.03f, 7000, 3000, 1.0f, 0.7f, 0.001f, 0.01f, F_HP);
+    tone(0, 0.3f, 2400, 900, 0.3f, 0.001f, 0.1f, W_FM, 1.5f, 6.0f);
+    tone(0.2f, 0.9f, 110, 440, 0.35f, 0.05f, 0.4f, W_SOFT, 0.3f, 0);
+    tone(0.2f, 0.9f, 165, 660, 0.25f, 0.05f, 0.4f, W_SOFT, 0.4f, 0);
+    tone(0.2f, 0.9f, 220, 880, 0.2f, 0.05f, 0.4f, W_SOFT, 0.5f, 0);
+    for (int i = 0; i < 4; i++) bell(0.9f + 0.07f * (float)i, (float[]){C6, E6, G6, C7}[i], 0.4f, 0.14f);
+    finish_fx(SFX_PB_GIGA, 0.25f, 0.4f);
 
     /* --- the sea --- */
     begin();                                                         /* wind gust: a swelling, whistling howl */
@@ -431,6 +533,7 @@ void audio_init(void)
     finish_fx(SFX_SPLASH, 0.2f, 0.3f);
 }
 
-const int16_t *audio_data(int id) { return SFX[id]; }
+const int16_t *audio_data(int id) { return &SFXPOOL[sfx_off[id]]; }
+int            audio_pool_used(void) { return pool_used; }
 int            audio_len(int id)  { return sfx_len[id]; }
 int            audio_volume(int id) { return VOL[id]; }

@@ -18,8 +18,9 @@ enum {
     SFX_WAVE, SFX_CLEAR, SFX_HISS, SFX_THUNDER, SFX_CRACK, SFX_BOSS,
     SFX_WIN, SFX_LOSE, SFX_PAUSE, SFX_START, SFX_COIN,
     SFX_GUST, SFX_CANNON, SFX_SPLASH,
-    /* pirate voices (level 5), arcade speech-chip style */
-    SFX_V_ARR_MATEY, SFX_V_SHIVER, SFX_V_YOHOHO, SFX_V_HARHAR, SFX_V_PLANK, SFX_V_ARR, SFX_V_AVAST,
+    /* level 6: a pinball machine */
+    SFX_PB_BUMPER, SFX_PB_KICKER, SFX_PB_FLIPPER, SFX_PB_COMBO, SFX_PB_DROP, SFX_PB_BUZZ, SFX_PB_TICK, SFX_PB_DING,
+    SFX_PB_LAUNCH, SFX_PB_JACKPOT, SFX_PB_TILT, SFX_PB_SCOTT, SFX_PB_WIN, SFX_PB_DRAIN, SFX_PB_WARP, SFX_PB_SURGE, SFX_PB_GIGA,
     SFX_COUNT
 };
 
@@ -27,5 +28,6 @@ void           audio_init(void);               /* synthesize every effect (call 
 const int16_t *audio_data(int id);             /* 32-byte aligned sample buffer */
 int            audio_len(int id);              /* length in samples (multiple of 16) */
 int            audio_volume(int id);           /* suggested playback volume 0..255 */
+int            audio_pool_used(void);          /* samples of the effect pool in use (for the tests) */
 
 #endif

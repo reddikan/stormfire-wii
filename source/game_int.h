@@ -16,7 +16,7 @@ extern int MW, MH;       /* the current level's map size (set by map_load) */
 
 /* tile kinds */
 enum { TL_PATH, TL_WALL, TL_BLOCK, TL_LAWN, TL_TREE, TL_FIRE, TL_GRAVE };   /* TL_GRAVE: any non-buildable prop tile */
-enum { DECO_GRAVE, DECO_ORRERY, DECO_RUNE, DECO_WRECK, DECO_WATER };   /* which prop sits on a TL_GRAVE tile (in Tile.color) */
+enum { DECO_GRAVE, DECO_ORRERY, DECO_RUNE, DECO_WRECK, DECO_WATER, DECO_CLOCK, DECO_LAMP };   /* which prop sits on a TL_GRAVE tile (in Tile.color) */
 /* block colours (TL_BLOCK) */
 enum { BC_RED, BC_ORANGE, BC_YELLOW, BC_GREEN, BC_MINT, BC_BLUE, BC_PURPLE, BC_CYAN, BC_COUNT };
 
@@ -58,6 +58,7 @@ enum { EN_CRAWLER, EN_GRUNT, EN_BRUTE, EN_WISP, EN_GOLEM,                    /* 
        EN_ZOMBIE, EN_GHOST, EN_SKELETON, EN_BAT, EN_BREAKER, EN_GHOULKING,       /* level 3 */
        EN_AUTOMATON, EN_SPRINGER, EN_MOTH, EN_TINKER, EN_SENTINEL, EN_ARCHITECT, /* level 4 */
        EN_ROWBOAT, EN_SHARK, EN_SKULLPIRATE, EN_PARROT, EN_SHIP, EN_KRAKEN,      /* level 5 */
+       EN_HOVERBOARD, EN_DRONE, EN_SERVO, EN_HOLOSHARK, EN_PARADOX, EN_ECHO, EN_HOVERCAR, EN_TIMETRAIN, /* level 6 */
        EN_TYPES };
 typedef struct {
     const char *name;
@@ -99,6 +100,7 @@ typedef struct {
     float heal_t;           /* tinker: until the next repair pulse */
     float pulse_t;          /* architect: until the next tower-jamming shockwave */
     float heal_fx;          /* just got repaired (green flash) */
+    float jx, jz;           /* time train: where its last time-jump started */
 } Enemy;
 
 /* projectiles */
@@ -138,6 +140,10 @@ typedef struct {
 #define NUM_LEAVES 70     /* autumn uses the first drops as falling leaves */
 typedef struct { float x, y, z, len; } Drop;
 
+/* level 6: twin fire trails burnt into the road where something arrived from another time */
+#define MAX_TRAIL 24
+typedef struct { float x0, z0, x1, z1, t, life; } Trail;
+
 #define MAX_POP 24
 typedef struct { float x, y, z, t; char txt[12]; uint32_t c; } Pop;
 
@@ -154,7 +160,7 @@ typedef struct { uint8_t type, count, gate; float delay, gap; } Group;
 typedef struct { int n, gates; float hpmul; Group g[MAX_GROUPS]; } WaveDef;   /* gates: how many gates this wave uses */
 
 #define NUM_GATES 8
-enum { ENV_STORM, ENV_AUTUMN, ENV_HALLOW, ENV_ISLAND, ENV_PIRATE };
+enum { ENV_STORM, ENV_AUTUMN, ENV_HALLOW, ENV_ISLAND, ENV_PIRATE, ENV_FUTURE };
 typedef struct {
     const char *name;               /* shown on the title screen */
     const char *boss_line;          /* last-wave banner */
@@ -214,9 +220,18 @@ struct Game {
     float sun;              /* level 4: sunrise progress 0..1, follows the waves */
     float punch;            /* tiny zoom punch on big hits */
     float zoom, zoom_t;     /* L2/R2 camera zoom: 1 = whole map, up to ZOOM_MAX */
-    int   voice_id, voice_n;   /* level 5: a pirate shout waiting to play, and how many have played */
-    float voice_t, voice_cd;   /* its delay, and the gap before another may play */
     float gust, gust_t, gust_on;  /* level 5: a wind gust (0..1), time to the next one, time it keeps blowing */
+    /* level 6: pinball scoring and the time machine */
+    long  score;            /* pinball score */
+    int   combo; float combo_t;   /* kills in quick succession */
+    int   mph;              /* kills towards the next 88 MPH time surge */
+    float surge_t;          /* > 0 while a time surge ripples out from the DeLorean */
+    float giga_t;           /* until the clock tower draws the next 1.21 gigawatt bolt */
+    float giga_fx;          /* > 0 just after one */
+    float warp_cd;          /* throttles the time-warp arrival sound */
+    float tilt_cd;          /* throttles the TILT buzzer */
+    char  dmd[2][48]; float dmd_t; uint32_t dmd_c;   /* the dot-matrix display callout */
+    Trail trail[MAX_TRAIL];
     float end_t;
     int   boss;             /* index of the golem, -1 */
 

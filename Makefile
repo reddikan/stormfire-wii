@@ -20,7 +20,7 @@ export PATH := $(DEVKITPRO)/tools/bin:$(DEVKITPPC)/bin:$(PATH)
 
 TARGET  := boot
 SRCDIR  := source
-SRCS    := main game draw map r3d gfx audio music speech
+SRCS    := main game draw map r3d gfx audio music
 OBJS    := $(addprefix $(SRCDIR)/,$(addsuffix .o,$(SRCS)))
 HDRS    := $(wildcard $(SRCDIR)/*.h)
 

@@ -9,6 +9,7 @@
 
 #include <math.h>
 #include <string.h>
+#include <stdlib.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -19,13 +20,13 @@
 #define MUS_MAX (MUS_RATE * 30 + 16)
 static int16_t MUS[MUS_TRACKS][MUS_MAX] __attribute__((aligned(32)));
 static int     mus_len[MUS_TRACKS];
-static float   mix[MUS_MAX];
+static float  *mix;                       /* the loop being built (only needed while composing) */
 static int     N;                         /* length of the loop being built */
 static float   BEAT;                      /* seconds per beat */
 static uint32_t rng = 0x1234567u;
 static int     ready;
 
-static const uint8_t VOL[MUS_TRACKS] = { 100, 92, 96, 100, 104 };
+static const uint8_t VOL[MUS_TRACKS] = { 100, 92, 96, 100, 104, 100 };
 
 static float frnd(void)                  /* -1..1 */
 {
@@ -283,7 +284,7 @@ static void begin(float bpm, int beats)
     BEAT = 60.0f / bpm;
     N = ((int)((float)beats * BEAT * SR) + 15) & ~15;
     if (N > MUS_MAX) N = MUS_MAX;
-    memset(mix, 0, sizeof mix);
+    memset(mix, 0, sizeof(float) * MUS_MAX);
 }
 
 static void finish(int track)
@@ -623,15 +624,113 @@ static void track_pirate(void)
     finish(4);
 }
 
+/* synth bass: a sawtooth through a low-pass that snaps open on each note */
+static void sbass(float b, float dur, float m, float vel)
+{
+    int s0 = (int)(b * BEAT * SR), n = (int)((dur * BEAT + 0.03f) * SR);
+    float f = mtof(m), ph = 0, z1 = 0, z2 = 0;
+    for (int i = 0; i < n; i++) {
+        float t = (float)i / SR;
+        float e = env_adr(i, n, 0.004f, 0, 0.03f);
+        float k = 0.03f + 0.25f * expf(-t * 18.0f);
+        float saw = 2.0f * ph - 1.0f;
+        z1 += (saw - z1) * k; z2 += (z1 - z2) * k;
+        put(s0 + i, z2 * e * vel * 0.55f);
+        ph += f / SR; ph -= floorf(ph);
+    }
+}
+
+/* synth lead: two detuned saws, a touch of square, vibrato that comes in late - a heroic 80s brass-synth */
+static void slead(float b, float dur, float m, float vel)
+{
+    int s0 = (int)(b * BEAT * SR), n = (int)((dur * BEAT + 0.15f) * SR);
+    float f = mtof(m), p1 = 0, p2 = 0, z1 = 0, z2 = 0;
+    for (int i = 0; i < n; i++) {
+        float t = (float)i / SR;
+        float vib = 1.0f + (t > 0.2f ? 0.005f * sinf(TAU_F * 5.5f * t) * fminf((t - 0.2f) * 3.0f, 1.0f) : 0.0f);
+        float e = env_adr(i, n, 0.02f, 0, 0.12f);
+        float v = (2.0f * p1 - 1.0f) + (2.0f * p2 - 1.0f) * 0.8f + (p1 < 0.5f ? 0.3f : -0.3f);
+        float k = 0.12f + 0.1f * expf(-t * 6.0f);
+        z1 += (v - z1) * k; z2 += (z1 - z2) * k;
+        put(s0 + i, z2 * e * vel * 0.16f);
+        p1 += f * vib * 1.004f / SR; p1 -= floorf(p1);
+        p2 += f * vib * 0.996f / SR; p2 -= floorf(p2);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* 5: 88 MPH - driving 80s synthwave in C minor, 128 bpm                */
+/* ------------------------------------------------------------------ */
+static void track_future(void)
+{
+    begin(128, 64);
+    enum { CM, AB, EB, BB, G };
+    static const int PROG[16] = { CM, AB, EB, BB, CM, AB, EB, BB, AB, BB, CM, CM, AB, BB, G, G };
+    static const float ROOT[5] = { 36, 32, 39, 34, 31 };
+    static const float CH[5][3] = { {60, 63, 67}, {60, 63, 68}, {58, 63, 67}, {58, 62, 65}, {59, 62, 67} };
+    for (int bar = 0; bar < 16; bar++) {
+        int c = PROG[bar];
+        float b0 = (float)bar * 4;
+        int big = bar >= 8;
+        for (int q = 0; q < 8; q++)                                   /* pumping octave bass */
+            sbass(b0 + (float)q * 0.5f, 0.42f, ROOT[c] + ((q & 1) ? 12.0f : 0.0f), (q & 1) ? 0.6f : 0.75f);
+        for (int k = 0; k < 3; k++) pad(b0, 4.2f, CH[c][k], big ? 0.3f : 0.24f, 900.0f + 200.0f * (float)k);
+        for (int q = 0; q < 16; q++) {                                /* sparkling sixteenth arpeggio */
+            static const int ORD[4] = { 0, 1, 2, 1 };
+            float m = CH[c][ORD[q & 3]] + 12.0f + ((q & 4) ? 12.0f : 0.0f);
+            pluck(b0 + (float)q * 0.25f, 0.22f, m, big ? 0.32f : 0.24f, 0.85f);
+        }
+        kick(b0, 0.6f); kick(b0 + 1, 0.55f); kick(b0 + 2, 0.6f); kick(b0 + 3, 0.55f);
+        for (int s2 = 1; s2 < 4; s2 += 2) {                           /* big gated snare */
+            noise_hit(b0 + (float)s2, 0.8f, 0.09f, 1900.0f, 0.7f);
+            noise_hit(b0 + (float)s2, 0.35f, 0.05f, 220.0f, 1.2f);
+        }
+        for (int h = 0; h < 8; h++) noise_hit(b0 + (float)h * 0.5f + 0.25f * (float)(h & 1) * 0.0f, (h & 1) ? 0.3f : 0.18f, 0.02f, 8500.0f, 1.0f);
+        if ((bar & 3) == 3)                                          /* tom fill */
+            for (int k = 0; k < 4; k++) kick(b0 + 3.0f + (float)k * 0.25f, 0.3f + 0.08f * (float)k);
+    }
+    static const Note MEL[16][4] = {
+        { {0, 1.5f, 67}, {1.5f, 0.5f, 70}, {2, 2, 72} },
+        { {0, 1.5f, 75}, {1.5f, 0.5f, 74}, {2, 2, 72} },
+        { {0, 1, 70}, {1, 1, 67}, {2, 2, 70} },
+        { {0, 3, 74}, {3, 1, 70} },
+        { {0, 1.5f, 67}, {1.5f, 0.5f, 70}, {2, 2, 72} },
+        { {0, 1.5f, 75}, {1.5f, 0.5f, 77}, {2, 2, 79} },
+        { {0, 1, 79}, {1, 1, 77}, {2, 2, 75} },
+        { {0, 4, 74} },
+        { {0, 2, 72}, {2, 1, 75}, {3, 1, 79} },
+        { {0, 2, 77}, {2, 1, 74}, {3, 1, 70} },
+        { {0, 3, 79}, {3, 1, 84} },
+        { {0, 2, 82}, {2, 2, 79} },
+        { {0, 2, 80}, {2, 1, 79}, {3, 1, 77} },
+        { {0, 2, 79}, {2, 2, 77} },
+        { {0, 2, 74}, {2, 1, 77}, {3, 1, 79} },
+        { {0, 4, 74} },
+    };
+    for (int bar = 0; bar < 16; bar++)
+        for (int k = 0; k < 4; k++) {
+            const Note *nt = &MEL[bar][k];
+            if (nt->m <= 0) continue;
+            slead((float)bar * 4 + nt->b, nt->d, nt->m, bar >= 8 ? 0.7f : 0.55f);
+            if (bar >= 8) slead((float)bar * 4 + nt->b, nt->d, nt->m - 12, 0.3f);
+        }
+    reverb(0.3f, 1.2f);
+    finish(5);
+}
+
 void music_init(void)
 {
     if (ready) return;
     ready = 1;
+    mix = (float *)malloc(sizeof(float) * MUS_MAX);
+    if (!mix) return;
     track_storm();
     track_autumn();
     track_hallow();
     track_isle();
     track_pirate();
+    track_future();
+    free(mix); mix = NULL;
 }
 
 const int16_t *music_data(int track) { return MUS[track]; }

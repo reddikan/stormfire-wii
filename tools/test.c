@@ -316,6 +316,15 @@ static void screenshots(void)
     for (int i = 0; i < 60; i++) step(G, &NONE);
     G->storm_t = 99; G->flash_t = 10;
     SHOT("start");
+    {   /* the middle of the map, close up */
+        int ocx = G->cx, ocz = G->cz;
+        G->cx = FIRE_C; G->cz = FIRE_R; G->cur_x = (float)G->cx; G->cur_z = (float)G->cz;
+        G->zoom = G->zoom_t = ZOOM_MAX;
+        for (int i = 0; i < 60; i++) game_render(G);
+        SHOT("center");
+        G->zoom = G->zoom_t = 1.0f; G->cx = ocx; G->cz = ocz; G->cur_x = (float)ocx; G->cur_z = (float)ocz;
+        for (int i = 0; i < 60; i++) game_render(G);
+    }
     hand_built(G);
     G->cx = 9; G->cz = 9; G->sel = TW_FROST;
     for (int i = 0; i < 40; i++) step(G, &NONE);
@@ -327,6 +336,17 @@ static void screenshots(void)
     for (int i = 0; i < 60 * 14; i++) { step(G, &NONE); if (G->storm_t < 1) G->storm_t = 99; if (G->fire < 5) G->fire = 20; }
     G->flash_t = 10;
     SHOT("action");
+    if (G->lv->env == ENV_FUTURE) {
+        /* 1.21 gigawatts into the clock tower */
+        G->giga_t = 0;
+        for (int i = 0; i < 8; i++) step(G, &NONE);
+        SHOT("giga");
+        /* the 88th kill: a time surge */
+        G->mph = 87;
+        for (int i = 0; i < 600 && G->mph != 0; i++) step(G, &NONE);
+        for (int i = 0; i < 12; i++) step(G, &NONE);
+        SHOT("surge");
+    }
     G->shake = 0.6f; G->punch = 1.0f;     /* a mortar impact frame: shake, punch */
     SHOT("impact");
     G->shake = 0; G->punch = 0;
@@ -467,6 +487,33 @@ static void reel(void)
     for (int i = 0; i < 60 * 8; i++) { step(G, &NONE); if (G->fire < 5) G->fire = 20; }
     G->storm_t = 3.5f;
     int fr = 0;
+    if (G->lv->env == ENV_FUTURE) {
+        /* level 6: 1.21 gigawatts, a zoom on the time machine, a time surge, then the Time Train time-jumping */
+        for (int i = 0; i < 60 * 22; i++) {
+            if (i == 60 * 2) G->giga_t = 0;
+            if (i == 60 * 5) { G->cx = FIRE_C; G->cz = FIRE_R + 1; G->zoom_t = 2.0f; G->mph = 86; }
+            if (i == 60 * 10) G->zoom_t = 1.0f;
+            if (i == 60 * 12) {
+                for (int k = 0; k < MAX_EN; k++) G->en[k].alive = 0;
+                G->wave = G->lv->nwaves - 1; G->wave_on = 0; G->countdown = 0;
+                for (int k = 0; k < 60 * 45; k++) { step(G, &NONE); if (G->fire < 5) G->fire = 20; if (G->boss >= 0) G->en[G->boss].hp = G->en[G->boss].maxhp; }
+                if (G->boss >= 0) {
+                    G->en[G->boss].pulse_t = 2.5f;
+                    G->cx = (int)G->en[G->boss].x; G->cz = (int)G->en[G->boss].z;
+                    if (G->cx < 0) G->cx = 0; if (G->cz < 0) G->cz = 0; if (G->cx >= MW) G->cx = MW - 1; if (G->cz >= MH) G->cz = MH - 1;
+                }
+                G->zoom_t = 1.7f;
+            }
+            if (i == 60 * 19) G->zoom_t = 1.0f;
+            step(G, &NONE);
+            if (G->fire < 5) G->fire = 20;
+            if (i & 1) continue;
+            game_render(G);
+            raster();
+            snprintf(path, sizeof path, "%s/reel/f%04d.ppm", outdir, fr++);
+            save_ppm(path);
+        }
+    } else
     if (G->lv->env == ENV_PIRATE) {
         /* level 5: the storm and the swell, a gust, a zoom in on the action, then the Kraken */
         G->gust_t = 2.5f;
@@ -528,26 +575,6 @@ int main(int argc, char **argv)
     const char *what = argc > 2 ? argv[2] : "all";
     int only = argc > 3 ? atoi(argv[3]) - 1 : -1;
     verbose = argc > 4 ? (int)strlen(argv[4]) : 0;
-    if (!strcmp(what, "voices")) {
-        /* the pirate voices as .wav files, to listen to */
-        audio_init();
-        static const char *NM[] = { "arr_matey", "shiver", "yohoho", "harhar", "plank", "arr", "avast" };
-        for (int v = 0; v < 7; v++) {
-            int id = SFX_V_ARR_MATEY + v, n = audio_len(id), sr = SFX_RATE, br = SFX_RATE * 2, ds = n * 2, cs = 36 + ds, fmt = 16;
-            short one = 1, ba = 2, bits = 16;
-            char path[512];
-            snprintf(path, sizeof path, "%s/voice_%s.wav", outdir, NM[v]);
-            FILE *f = fopen(path, "wb");
-            if (!f) continue;
-            fwrite("RIFF", 1, 4, f); fwrite(&cs, 4, 1, f); fwrite("WAVEfmt ", 1, 8, f); fwrite(&fmt, 4, 1, f);
-            fwrite(&one, 2, 1, f); fwrite(&one, 2, 1, f); fwrite(&sr, 4, 1, f); fwrite(&br, 4, 1, f); fwrite(&ba, 2, 1, f); fwrite(&bits, 2, 1, f);
-            fwrite("data", 1, 4, f); fwrite(&ds, 4, 1, f);
-            fwrite(audio_data(id), 2, (size_t)n, f);
-            fclose(f);
-            printf("  %s: %.2f s\n", path, (float)n / (float)SFX_RATE);
-        }
-        return 0;
-    }
     for (LEVEL = 0; LEVEL < NUM_LEVELS; LEVEL++) {
         if (only >= 0 && LEVEL != only) continue;
         if (!strcmp(what, "reel")) { reel(); continue; }
