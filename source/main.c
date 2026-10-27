@@ -23,7 +23,9 @@
 
 #include "game.h"
 #include "music.h"
+#include "audio.h"
 #include "gfx.h"
+#include <ogc/lwp.h>
 
 #define FIFO_SIZE (512 * 1024)
 
@@ -240,6 +242,42 @@ static void play_sfx(int id, int pitch, float pan)
     ASND_SetVoice(v, VOICE_MONO_16BIT, rate, 0, (void *)audio_data(id), audio_len(id) * 2, vl, vr, NULL);
 }
 
+/* ------------------------------------------------------------------ */
+/* start-up: a loading screen while the sound effects are made, then the music is composed on a
+ * low-priority thread while the game already runs (the track that is wanted gets composed first)   */
+/* ------------------------------------------------------------------ */
+static u64 load_last;
+static void draw_loading(int done, int total)
+{
+    u64 now = gettime();
+    if (done < total && load_last && diff_usec(load_last, now) < 60000) return;   /* a frame every ~60 ms is plenty */
+    load_last = now;
+    float f = total > 0 ? (float)done / (float)total : 0.0f;
+    gfx_begin();
+    gfx_rect_v(0, 0, VW, VH, 0x0A1020FF, 0x02040AFF);
+    gfx_text_sc("STORMFIRE", VW * 0.5f, 170, 8.0f, 0xFF9040FF);
+    gfx_text_sc("LOADING", VW * 0.5f, 270, 2.6f, 0xC8D4F0FF);
+    gfx_rect(VW * 0.5f - 201, 310, 402, 18, 0x303848FF);
+    gfx_rect_v(VW * 0.5f - 199, 312, 398 * f, 14, 0xFFC060FF, 0xE06020FF);
+    show_previous();
+    draw_list();
+    present();
+}
+
+static volatile int music_want = 0;
+static lwp_t music_thread;
+static u8 music_stack[64 * 1024] __attribute__((aligned(32)));
+static void *music_worker(void *arg)
+{
+    (void)arg;
+    for (int t; (t = music_next(music_want)) >= 0; ) {
+        music_render(t);
+        if (music_data(t)) DCFlushRange((void *)music_data(t), (u32)music_len(t) * 2);   /* the DSP reads it by DMA */
+        music_set_ready(t);
+    }
+    return NULL;
+}
+
 static void on_reset(u32 irq, void *ctx) { (void)irq; (void)ctx; quit = 1; }
 static void on_power(void) { quit = 1; }
 
@@ -256,12 +294,15 @@ int main(int argc, char **argv)
     SYS_SetResetCallback(on_reset);
     SYS_SetPowerCallback(on_power);
 
-    game = (Game *)memalign(32, GAME_SIZE);
-    game_init(game);                           /* also synthesizes the sound effects */
+    audio_progress = draw_loading;
+    draw_loading(0, SFX_COUNT);
+    audio_init();                              /* make the sound effects, with a loading bar */
+    audio_progress = NULL;
     for (int id = 0; id < SFX_COUNT; id++)     /* ASND reads samples by DMA: flush the cache */
         DCFlushRange((void *)audio_data(id), (u32)audio_len(id) * 2);
-    for (int t = 0; t < MUS_TRACKS; t++)
-        DCFlushRange((void *)music_data(t), (u32)music_len(t) * 2);
+    game = (Game *)memalign(32, GAME_SIZE);
+    game_init(game);
+    LWP_CreateThread(&music_thread, music_worker, NULL, music_stack, sizeof music_stack, 10);   /* low priority: it runs while the game waits for the screen */
     int playing = -1;
 
     const float dt = 1.0f / 60.0f;              /* the game simulates in fixed 1/60 s steps */
@@ -297,6 +338,8 @@ int main(int argc, char **argv)
         while ((id = game_pop_sound(game, &pitch, &pan)) >= 0) play_sfx(id, pitch, pan);
 
         int want = game_music(game);           /* switch the music loop when the level (or the setting) changes */
+        if (want >= 0) music_want = want;
+        if (want >= 0 && !music_ready(want)) want = -2;      /* still being composed: start it when it is ready */
         if (want != playing) {
             ASND_StopVoice(MUSIC_VOICE);
             if (want >= 0)

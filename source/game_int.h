@@ -59,6 +59,7 @@ enum { EN_CRAWLER, EN_GRUNT, EN_BRUTE, EN_WISP, EN_GOLEM,                    /* 
        EN_AUTOMATON, EN_SPRINGER, EN_MOTH, EN_TINKER, EN_SENTINEL, EN_ARCHITECT, /* level 4 */
        EN_ROWBOAT, EN_SHARK, EN_SKULLPIRATE, EN_PARROT, EN_SHIP, EN_KRAKEN,      /* level 5 */
        EN_HOVERBOARD, EN_DRONE, EN_SERVO, EN_HOLOSHARK, EN_PARADOX, EN_ECHO, EN_HOVERCAR, EN_TIMETRAIN, /* level 6 */
+       EN_UNICORN, EN_LEPRECHAUN, EN_FROG, EN_PIXIE, EN_TROLL, EN_WITCH, EN_GINGER, EN_GINGERBIT, EN_DRAGON, /* level 7 */
        EN_TYPES };
 typedef struct {
     const char *name;
@@ -160,7 +161,8 @@ typedef struct { uint8_t type, count, gate; float delay, gap; } Group;
 typedef struct { int n, gates; float hpmul; Group g[MAX_GROUPS]; } WaveDef;   /* gates: how many gates this wave uses */
 
 #define NUM_GATES 8
-enum { ENV_STORM, ENV_AUTUMN, ENV_HALLOW, ENV_ISLAND, ENV_PIRATE, ENV_FUTURE };
+enum { ENV_STORM, ENV_AUTUMN, ENV_HALLOW, ENV_ISLAND, ENV_PIRATE, ENV_FUTURE, ENV_SKY };
+#define PINBALL_ENV(g) ((g)->lv->env == ENV_FUTURE || (g)->lv->env == ENV_SKY)
 typedef struct {
     const char *name;               /* shown on the title screen */
     const char *boss_line;          /* last-wave banner */
@@ -230,6 +232,8 @@ struct Game {
     float giga_fx;          /* > 0 just after one */
     float warp_cd;          /* throttles the time-warp arrival sound */
     float tilt_cd;          /* throttles the TILT buzzer */
+    int   wave_leaks;       /* leaks at the start of this wave (a clean wave is a PERFECT WAVE) */
+    float fw_t;             /* level 7: fireworks still to go off after a wave is cleared */
     char  dmd[2][48]; float dmd_t; uint32_t dmd_c;   /* the dot-matrix display callout */
     Trail trail[MAX_TRAIL];
     float end_t;

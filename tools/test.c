@@ -195,7 +195,7 @@ static Result play(int skill, uint32_t seed, int shots, const char *tag)
     step(G, &start);
     float t = 0;
     int think = 0, shot_wave = 0, last_wave = 0;
-    while (t < 1500.0f && G->state == ST_PLAY) {
+    while (t < 2400.0f && G->state == ST_PLAY) {
         if (++think >= (skill == 1 ? 90 : 20)) { think = 0; bot_think(G, skill); }
         /* keen bots call waves early once they are set up */
         if (skill == 3 && !G->wave_on && G->countdown < 9.0f && G->wave > 0) {
@@ -336,13 +336,13 @@ static void screenshots(void)
     for (int i = 0; i < 60 * 14; i++) { step(G, &NONE); if (G->storm_t < 1) G->storm_t = 99; if (G->fire < 5) G->fire = 20; }
     G->flash_t = 10;
     SHOT("action");
-    if (G->lv->env == ENV_FUTURE) {
-        /* 1.21 gigawatts into the clock tower */
+    if (G->lv->env == ENV_FUTURE || G->lv->env == ENV_SKY) {
+        /* 1.21 gigawatts into the clock tower (level 7: the rainbow blast from the castle) */
         G->giga_t = 0;
         for (int i = 0; i < 8; i++) step(G, &NONE);
         SHOT("giga");
         /* the 88th kill: a time surge */
-        G->mph = 87;
+        G->mph = G->lv->env == ENV_SKY ? 76 : 87;
         for (int i = 0; i < 600 && G->mph != 0; i++) step(G, &NONE);
         for (int i = 0; i < 12; i++) step(G, &NONE);
         SHOT("surge");
@@ -487,11 +487,11 @@ static void reel(void)
     for (int i = 0; i < 60 * 8; i++) { step(G, &NONE); if (G->fire < 5) G->fire = 20; }
     G->storm_t = 3.5f;
     int fr = 0;
-    if (G->lv->env == ENV_FUTURE) {
-        /* level 6: 1.21 gigawatts, a zoom on the time machine, a time surge, then the Time Train time-jumping */
+    if (G->lv->env == ENV_FUTURE || G->lv->env == ENV_SKY) {
+        /* level 6: 1.21 gigawatts (level 7: the rainbow blast), a zoom on the time machine, a time surge, then the Time Train time-jumping */
         for (int i = 0; i < 60 * 22; i++) {
             if (i == 60 * 2) G->giga_t = 0;
-            if (i == 60 * 5) { G->cx = FIRE_C; G->cz = FIRE_R + 1; G->zoom_t = 2.0f; G->mph = 86; }
+            if (i == 60 * 5) { G->cx = FIRE_C; G->cz = FIRE_R + 1; G->zoom_t = 2.0f; G->mph = G->lv->env == ENV_SKY ? 75 : 86; }
             if (i == 60 * 10) G->zoom_t = 1.0f;
             if (i == 60 * 12) {
                 for (int k = 0; k < MAX_EN; k++) G->en[k].alive = 0;
@@ -572,6 +572,7 @@ int main(int argc, char **argv)
     /* usage: test <outdir> [all|reel|shots|perf|bots] [level 1..N] [v] */
     if (argc > 1) outdir = argv[1];
     G = (Game *)calloc(1, (size_t)GAME_SIZE);
+    music_init();
     const char *what = argc > 2 ? argv[2] : "all";
     int only = argc > 3 ? atoi(argv[3]) - 1 : -1;
     verbose = argc > 4 ? (int)strlen(argv[4]) : 0;

@@ -9,17 +9,19 @@
 
 #include <math.h>
 #include <string.h>
+#include <malloc.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-#define MAXLEN 80000                       /* 2.5 s per effect at 32 kHz, a multiple of 16 so rows stay 32-byte aligned */
+#define MAXLEN 56000                       /* 2.5 s per effect, a multiple of 16 so each stays 32-byte aligned */
 
 /* every effect lives back to back in one pool (each start 32-byte aligned), sized to what they really need */
-#define SFX_POOL 1600000
-static int16_t SFXPOOL[SFX_POOL] __attribute__((aligned(32)));
-static int     sfx_off[SFX_COUNT], sfx_len[SFX_COUNT], pool_used;
+#define SFX_POOL 2600000
+static int16_t *SFXPOOL;                 /* allocated (32-byte aligned for the DSP) when the effects are made */
+static int     sfx_off[SFX_COUNT], sfx_len[SFX_COUNT], pool_used, made;
+void (*audio_progress)(int done, int total);
 static float   mixbuf[MAXLEN];
 static float   outbuf[MAXLEN];
 static int     mixend;
@@ -27,7 +29,7 @@ static uint32_t rng = 0x2545F491u;
 static int     ready;
 
 /* playback volume per effect (every effect is normalised first, then scaled by this to balance loudness) */
-static const uint8_t VOL[SFX_COUNT] = {
+static uint8_t VOL[SFX_COUNT] = {
     /* BLASTER */ 60,  /* MORTAR */ 130, /* BOOM */ 190,   /* FROST */ 110,  /* ZAP */ 120,    /* HIT */ 45,
     /* POP */ 120,     /* CRUNCH */ 190, /* BUILD */ 190,  /* UPGRADE */ 200, /* SELL */ 170,   /* ERROR */ 140,
     /* MOVE */ 60,     /* SELECT */ 120, /* WAVE */ 200,   /* CLEAR */ 200,  /* HISS */ 200,   /* THUNDER */ 255,
@@ -35,7 +37,7 @@ static const uint8_t VOL[SFX_COUNT] = {
     /* COIN */ 170,    /* GUST */ 150,   /* CANNON */ 220, /* SPLASH */ 160,
     /* pinball: BUMPER */ 130, /* KICKER */ 170, /* FLIPPER */ 170, /* COMBO */ 190, /* DROP */ 170, /* BUZZ */ 150,
     /* TICK */ 70, /* DING */ 150, /* LAUNCH */ 210, /* JACKPOT */ 220, /* TILT */ 210, /* SCOTT */ 210, /* WIN */ 230,
-    /* DRAIN */ 220, /* WARP */ 150, /* SURGE */ 240, /* GIGA */ 240
+    /* DRAIN */ 220, /* WARP */ 150, /* SURGE */ 240, /* GIGA */ 240, /* PERFECT */ 230
 };
 
 /* ------------------------------------------------------------------ */
@@ -181,7 +183,7 @@ static void finish_fx(int id, float wet, float room)
         if (fabsf(x) > peak) peak = fabsf(x);
     }
     int last = len;                                    /* trim the silent tail */
-    while (last > 1 && fabsf(outbuf[last - 1]) < peak * 0.003f) last--;
+    while (last > 1 && fabsf(outbuf[last - 1]) < peak * 0.012f) last--;
     last += (int)(0.02f * SR);
     if (last < len) len = last;
     int fade = (int)(0.02f * SR);
@@ -199,6 +201,7 @@ static void finish_fx(int id, float wet, float room)
         dst[i] = (int16_t)(x * scale);
     }
     sfx_len[id] = outlen;
+    if (audio_progress) audio_progress(++made, SFX_COUNT);
 }
 
 #define C4 261.63f
@@ -226,10 +229,180 @@ static void bell(float t, float f, float vol, float tau)
 }
 
 
+
+/* ------------------------------------------------------------------ */
+/* themed sets (levels 2, 3, 4, 7)                                      */
+/* ------------------------------------------------------------------ */
+static const uint8_t TH_VOL[TH_SLOTS] = { 120, 190, 190, 200, 170, 210, 215, 240, 210, 225, 220, 160, 110, 60, 130, 185, 110, 120 };
+
+static void marimba(float t, float f, float vol, float tau)
+{
+    tone(t, tau * 4.0f, f, f, vol, 0.001f, tau, W_FM, 4.0f, 1.4f);
+    tone(t, tau * 3.0f, f, f, vol * 0.6f, 0.001f, tau * 1.4f, W_SIN, 0, 0);
+}
+static void woodblock(float t, float f, float vol)
+{
+    tone(t, 0.06f, f, f * 0.9f, vol, 0.0005f, 0.018f, W_FM, 3.5f, 2.0f);
+    noise(t, 0.02f, f * 2.0f, f * 2.0f, 2.0f, vol * 0.3f, 0.0005f, 0.006f, F_BP);
+}
+static void chirp(float t, float f0, float f1, float vol)
+{
+    tone(t, 0.07f, f0, f1, vol, 0.004f, 0.03f, W_SIN, 0, 0);
+}
+static void organ_chord(float t, float dur, const float *f, int n, float vol)
+{
+    for (int i = 0; i < n; i++) tone(t, dur, f[i], f[i], vol, 0.03f, dur * 0.6f, W_SOFT, 1.0f, 0);
+}
+static void wail(float t, float dur, float f0, float f1, float vol)       /* ghostly sine glide with a wobble */
+{
+    tone(t, dur, f0, f1, vol, dur * 0.25f, dur * 0.5f, W_FM, 5.5f / f0, f0 / 400.0f);
+}
+static void clank(float t, float f, float vol)                           /* metal */
+{
+    tone(t, 0.4f, f, f, vol, 0.001f, 0.12f, W_FM, 2.76f, 3.0f);
+    noise(t, 0.05f, 4000, 2500, 3.0f, vol * 0.5f, 0.001f, 0.015f, F_BP);
+}
+static void bones_click(float t, float f, float vol)
+{
+    tone(t, 0.12f, f, f, vol, 0.0005f, 0.03f, W_FM, 3.0f, 2.0f);
+}
+static void tick(float t, float vol) { noise(t, 0.012f, 5000, 4000, 2.5f, vol, 0.0005f, 0.004f, F_BP); }
+static void twinkle(float t, float f, float vol) { bell(t, f, vol, 0.12f); bell(t + 0.04f, f * 1.5f, vol * 0.6f, 0.09f); }
+static void gliss(float t, float f0, int n, float step, float dt, float vol)   /* harp-ish run */
+{
+    for (int i = 0; i < n; i++) bell(t + dt * (float)i, f0 * powf(2.0f, step * (float)i / 12.0f), vol, 0.15f);
+}
+
+static void theme_set(int base, int th)       /* th: 0 autumn, 1 hallow, 2 island, 3 sky */
+{
+    static const float ch_maj[3] = { C5, E5, G5 }, ch_min[3] = { 440.0f, C5, E5 }, low_min[3] = { 110.0f, 130.8f, 164.8f };
+    for (int slot = 0; slot < TH_SLOTS; slot++) {
+        begin();
+        float wet = 0.2f, room = 0.3f;
+        switch (th * 100 + slot) {
+        /* ---- autumn: wooden, folksy, birds and leaves ---- */
+        case TH_POP: woodblock(0, 880, 0.8f); noise(0.01f, 0.12f, 3500, 2500, 0.8f, 0.3f, 0.01f, 0.04f, F_BP); break;
+        case TH_CRUNCH: for (int i = 0; i < 6; i++) noise(0.03f * (float)i, 0.03f, 2500 - 200 * (float)i, 1800, 2.0f, 0.8f, 0.001f, 0.01f, F_BP);
+                        tone(0, 0.25f, 120, 60, 0.8f, 0.001f, 0.08f, W_SIN, 0, 0); break;
+        case TH_BUILD: woodblock(0, 400, 0.9f); woodblock(0.1f, 420, 0.9f); marimba(0.2f, C5, 0.4f, 0.12f); marimba(0.28f, G5, 0.4f, 0.14f); break;
+        case TH_UPGRADE: for (int i = 0; i < 4; i++) marimba(0.07f * (float)i, (float[]){C5, E5, G5, C6}[i], 0.45f, 0.12f); break;
+        case TH_SELL: for (int i = 0; i < 3; i++) marimba(0.06f * (float)i, (float[]){G5, E5, C5}[i], 0.45f, 0.08f); break;
+        case TH_WAVE: tone(0, 0.5f, 220, 233, 0.6f, 0.04f, 0.35f, W_SOFT, 1.2f, 0); tone(0.4f, 0.7f, 330, 330, 0.6f, 0.04f, 0.45f, W_SOFT, 1.2f, 0);
+                      noise(0, 0.9f, 3000, 2000, 0.6f, 0.15f, 0.2f, 0.3f, F_BP); break;
+        case TH_CLEAR: for (int i = 0; i < 6; i++) marimba(0.05f * (float)i, (float[]){C5, E5, G5, C6, E5 * 2, G5 * 2}[i], 0.4f, 0.2f);
+                       chirp(0.4f, 2400, 3200, 0.3f); chirp(0.5f, 2600, 3400, 0.3f); break;
+        case TH_BOSS: tone(0, 1.5f, 73, 65, 0.8f, 0.1f, 0.8f, W_SOFT, 0.8f, 0); for (int i = 0; i < 4; i++) woodblock(0.3f * (float)i, 150, 0.9f); break;
+        case TH_LEAK: noise(0, 0.6f, 5000, 2000, 0.6f, 0.5f, 0.01f, 0.25f, F_HP); woodblock(0, 200, 0.7f); break;
+        case TH_WIN: for (int i = 0; i < 8; i++) marimba(0.11f * (float)i, (float[]){C5, D5, E5, G5, E5, G5, C6, C6}[i], 0.45f, 0.2f); break;
+        case TH_LOSE: for (int i = 0; i < 4; i++) marimba(0.22f * (float)i, (float[]){E5, D5, C5, 440.0f}[i], 0.45f, 0.35f); break;
+        case TH_COIN: chirp(0, 2600, 3600, 0.5f); chirp(0.08f, 3000, 4000, 0.4f); break;
+        case TH_SELECT: woodblock(0, 1400, 0.6f); break;
+        case TH_BLASTER: noise(0, 0.08f, 1500, 6000, 1.5f, 0.4f, 0.001f, 0.03f, F_BP); tone(0, 0.08f, 1300, 600, 0.3f, 0.001f, 0.03f, W_TRI, 0, 0); break;
+        case TH_MORTAR: tone(0, 0.2f, 170, 75, 1.0f, 0.001f, 0.07f, W_FM, 2.0f, 1.5f); woodblock(0, 300, 0.5f); break;
+        case TH_BOOM: tone(0, 0.5f, 130, 40, 1.0f, 0.001f, 0.15f, W_SIN, 0, 0); noise(0.02f, 0.6f, 3000, 1500, 0.6f, 0.6f, 0.02f, 0.2f, F_BP); break;
+        case TH_FROST: for (int i = 0; i < 5; i++) bell(0.05f * (float)i, 2000.0f + 350.0f * (float)((i * 3) % 5), 0.25f, 0.15f); break;
+        case TH_ZAP: for (int i = 0; i < 7; i++) noise(0.025f * (float)i, 0.02f, 4000, 2500, 1.5f, 0.6f, 0.001f, 0.008f, F_BP); tone(0, 0.15f, 600, 300, 0.3f, 0.001f, 0.05f, W_FM, 1.0f, 3.0f); break;
+        /* ---- hallow: spooky organ, bones, wails, bells, chains ---- */
+        case 100 + TH_POP: noise(0, 0.15f, 600, 2500, 0.8f, 0.6f, 0.01f, 0.05f, F_BP); bones_click(0.02f, 1200, 0.5f); break;
+        case 100 + TH_CRUNCH: for (int i = 0; i < 5; i++) bones_click(0.05f * (float)i, 1500.0f - 150.0f * (float)i, 0.6f); tone(0, 0.3f, 100, 50, 0.8f, 0.001f, 0.1f, W_SIN, 0, 0); break;
+        case 100 + TH_BUILD: tone(0, 0.35f, 300, 420, 0.25f, 0.05f, 0.2f, W_FM, 0.5f, 4.0f); organ_chord(0.25f, 0.5f, ch_min, 3, 0.25f); break;
+        case 100 + TH_UPGRADE: for (int i = 0; i < 4; i++) tone(0.08f * (float)i, 0.35f, (float[]){440.0f, C5, E5, 880.0f}[i], (float[]){440.0f, C5, E5, 880.0f}[i], 0.3f, 0.01f, 0.2f, W_SOFT, 1.0f, 0); break;
+        case 100 + TH_SELL: for (int i = 0; i < 6; i++) noise(0.04f * (float)i, 0.04f, 4500, 3500, 4.0f, 0.6f, 0.001f, 0.015f, F_BP); break;
+        case 100 + TH_WAVE: bell(0, 196.0f, 0.8f, 0.8f); bell(0, 293.7f, 0.3f, 0.6f); wet = 0.5f; room = 0.8f; break;
+        case 100 + TH_CLEAR: organ_chord(0, 0.5f, ch_min, 3, 0.28f); organ_chord(0.45f, 0.8f, ch_maj, 3, 0.28f); bell(0.45f, C6 * 2.0f, 0.2f, 0.3f); break;
+        case 100 + TH_BOSS: organ_chord(0, 1.6f, low_min, 3, 0.4f); noise(0, 1.6f, 300, 60, 0.7f, 0.5f, 0.2f, 0.8f, F_LP); break;
+        case 100 + TH_LEAK: wail(0, 0.9f, 400, 700, 0.5f); wail(0.3f, 0.7f, 700, 300, 0.4f); break;
+        case 100 + TH_WIN: for (int i = 0; i < 7; i++) bell(0.12f * (float)i, (float[]){E5, G5, B5, E6, B5, E6, G6}[i], 0.35f, 0.25f); organ_chord(0.84f, 0.9f, ch_maj, 3, 0.25f); break;
+        case 100 + TH_LOSE: wail(0, 1.6f, 600, 150, 0.6f); break;
+        case 100 + TH_COIN: bell(0, 1760.0f, 0.4f, 0.15f); bell(0.06f, 2349.0f, 0.3f, 0.2f); break;
+        case 100 + TH_SELECT: bones_click(0, 1800, 0.6f); break;
+        case 100 + TH_BLASTER: wail(0, 0.12f, 1000, 550, 0.4f); noise(0, 0.05f, 2000, 1000, 1.5f, 0.2f, 0.001f, 0.02f, F_BP); break;
+        case 100 + TH_MORTAR: tone(0, 0.2f, 140, 90, 0.9f, 0.001f, 0.06f, W_FM, 1.5f, 2.0f); noise(0, 0.08f, 800, 500, 2.0f, 0.5f, 0.001f, 0.03f, F_BP); break;
+        case 100 + TH_BOOM: tone(0, 0.6f, 110, 35, 1.0f, 0.001f, 0.18f, W_SIN, 0, 0); noise(0.05f, 0.6f, 400, 2000, 0.8f, 0.4f, 0.1f, 0.2f, F_BP); wet = 0.4f; break;
+        case 100 + TH_FROST: noise(0, 0.4f, 7000, 4000, 0.8f, 0.4f, 0.05f, 0.15f, F_HP); tone(0, 0.4f, 3000, 2200, 0.15f, 0.01f, 0.15f, W_FM, 3.0f, 1.0f); break;
+        case 100 + TH_ZAP: tone(0, 0.2f, 1800, 600, 0.3f, 0.001f, 0.07f, W_FM, 1.3f, 5.0f); wail(0.02f, 0.18f, 1500, 2200, 0.2f); for (int i = 0; i < 4; i++) noise(0.04f * (float)i, 0.025f, 6000, 3000, 1.0f, 0.4f, 0.001f, 0.008f, F_HP); break;
+        /* ---- island: clockwork, brass, steam, music box ---- */
+        case 200 + TH_POP: clank(0, 1900, 0.4f); tick(0.01f, 0.5f); break;
+        case 200 + TH_CRUNCH: for (int i = 0; i < 5; i++) clank(0.06f * (float)i, 900.0f + 230.0f * (float)((i * 2) % 5), 0.5f); break;
+        case 200 + TH_BUILD: for (int i = 0; i < 5; i++) tick(0.04f * (float)i, 0.7f); clank(0.22f, 1320, 0.5f); break;
+        case 200 + TH_UPGRADE: for (int i = 0; i < 6; i++) bell(0.05f * (float)i, (float[]){C6, E6, G6, C7, G6, C7}[i], 0.3f, 0.1f); break;
+        case 200 + TH_SELL: clank(0, 2600, 0.35f); clank(0.07f, 2300, 0.35f); clank(0.13f, 2000, 0.35f); break;
+        case 200 + TH_WAVE: tone(0, 1.0f, 147, 147, 0.6f, 0.06f, 0.6f, W_SOFT, 0.2f, 0); tone(0, 1.0f, 220, 220, 0.4f, 0.06f, 0.6f, W_SOFT, 0.3f, 0);
+                            noise(0, 0.8f, 3000, 2500, 0.8f, 0.2f, 0.05f, 0.4f, F_BP); break;
+        case 200 + TH_CLEAR: for (int i = 0; i < 4; i++) bell(0.12f * (float)i, (float[]){G5, B5 / 1.0f, D5 * 2.0f, G5 * 2.0f}[i], 0.4f, 0.4f); break;
+        case 200 + TH_BOSS: tone(0, 1.8f, 65, 62, 0.8f, 0.01f, 0.9f, W_FM, 1.41f, 2.5f); noise(0.1f, 1.2f, 6000, 2500, 0.7f, 0.4f, 0.05f, 0.5f, F_HP); break;
+        case 200 + TH_LEAK: noise(0, 0.7f, 6000, 3000, 0.7f, 0.6f, 0.01f, 0.3f, F_HP); clank(0, 300, 0.6f); break;
+        case 200 + TH_WIN: for (int i = 0; i < 9; i++) bell(0.1f * (float)i, (float[]){C6, E6, G6, E6, C6, G5, C6, E6, C7}[i], 0.3f, 0.2f); break;
+        case 200 + TH_LOSE: for (int i = 0; i < 6; i++) bell(0.12f * (float)i + 0.02f * (float)(i * i), (float[]){C6, B5, G5, E5, D5, C5}[i], 0.3f, 0.25f); break;
+        case 200 + TH_COIN: bell(0, 3136.0f, 0.4f, 0.1f); break;
+        case 200 + TH_SELECT: tick(0, 0.8f); tick(0.05f, 0.5f); break;
+        case 200 + TH_BLASTER: noise(0, 0.05f, 4000, 1500, 1.0f, 0.4f, 0.001f, 0.02f, F_BP); clank(0.01f, 2400, 0.15f); break;
+        case 200 + TH_MORTAR: tone(0, 0.22f, 160, 70, 0.9f, 0.001f, 0.07f, W_SIN, 0, 0); noise(0, 0.3f, 5000, 2000, 0.8f, 0.5f, 0.01f, 0.1f, F_HP); break;
+        case 200 + TH_BOOM: tone(0, 0.5f, 140, 40, 1.0f, 0.001f, 0.15f, W_SIN, 0, 0); clank(0.02f, 700, 0.5f); noise(0, 0.5f, 2500, 300, 0.7f, 0.6f, 0.001f, 0.15f, F_LP); break;
+        case 200 + TH_FROST: for (int i = 0; i < 4; i++) tone(0.04f * (float)i, 0.5f, 2200.0f + 470.0f * (float)i, 2200.0f + 470.0f * (float)i, 0.2f, 0.001f, 0.2f, W_FM, 2.76f, 1.0f); break;
+        case 200 + TH_ZAP: tone(0, 0.25f, 300, 1200, 0.25f, 0.01f, 0.1f, W_SOFT, 0.0f, 0); for (int i = 0; i < 5; i++) noise(0.03f * (float)i, 0.02f, 7000, 4000, 1.0f, 0.5f, 0.001f, 0.008f, F_HP); break;
+        /* ---- sky: sparkles, harps, bubbles, wands and fanfares ---- */
+        case 300 + TH_POP: tone(0, 0.08f, 400, 1400, 0.6f, 0.001f, 0.03f, W_SIN, 0, 0); twinkle(0.03f, 2637, 0.25f); break;
+        case 300 + TH_CRUNCH: for (int i = 0; i < 6; i++) twinkle(0.03f * (float)i, 1800.0f + 300.0f * (float)((i * 3) % 6), 0.2f); tone(0, 0.2f, 200, 90, 0.6f, 0.001f, 0.06f, W_SIN, 0, 0); break;
+        case 300 + TH_BUILD: noise(0, 0.2f, 1000, 8000, 1.5f, 0.5f, 0.05f, 0.06f, F_BP); twinkle(0.18f, 2093, 0.35f); break;
+        case 300 + TH_UPGRADE: gliss(0, C5, 8, 2.0f, 0.035f, 0.3f); break;
+        case 300 + TH_SELL: gliss(0, C6 * 2.0f, 6, -2.0f, 0.035f, 0.25f); break;
+        case 300 + TH_WAVE: tone(0, 0.3f, 523, 523, 0.45f, 0.02f, 0.2f, W_SOFT, 0.6f, 0); tone(0.25f, 0.6f, 784, 784, 0.45f, 0.02f, 0.35f, W_SOFT, 0.6f, 0);
+                            gliss(0.2f, C5, 8, 2.0f, 0.03f, 0.2f); break;
+        case 300 + TH_CLEAR: for (int r = 0; r < 3; r++) for (int i = 0; i < 4; i++) bell(0.25f * (float)r + 0.06f * (float)i, (float[]){C6, E6, G6, C7}[i], 0.3f, 0.15f);
+                             gliss(0.75f, C5, 10, 2.0f, 0.03f, 0.2f); break;
+        case 300 + TH_BOSS: noise(0, 1.2f, 500, 150, 2.0f, 0.8f, 0.1f, 0.5f, F_LP); tone(0, 1.2f, 90, 60, 0.6f, 0.08f, 0.5f, W_FM, 0.5f, 6.0f);
+                            for (int i = 0; i < 4; i++) bell(0.3f * (float)i, i & 1 ? 1760.0f : 2093.0f, 0.3f, 0.12f); break;
+        case 300 + TH_LEAK: tone(0, 0.6f, 1500, 300, 0.5f, 0.01f, 0.3f, W_SIN, 0, 0); break;
+        case 300 + TH_WIN: for (int i = 0; i < 4; i++) tone(0.15f * (float)i, 0.5f, (float[]){C5, E5, G5, C6}[i], (float[]){C5, E5, G5, C6}[i], 0.35f, 0.01f, 0.3f, W_SOFT, 0.6f, 0);
+                           gliss(0.6f, C5, 14, 2.0f, 0.03f, 0.22f); break;
+        case 300 + TH_LOSE: gliss(0, C6, 8, -1.5f, 0.09f, 0.3f); break;
+        case 300 + TH_COIN: twinkle(0, 3136, 0.4f); break;
+        case 300 + TH_SELECT: tone(0, 0.06f, 600, 1200, 0.5f, 0.001f, 0.02f, W_SIN, 0, 0); break;
+        case 300 + TH_BLASTER: tone(0, 0.09f, 2500, 900, 0.4f, 0.001f, 0.03f, W_FM, 2.0f, 2.0f); break;
+        case 300 + TH_MORTAR: tone(0, 0.3f, 300, 120, 0.7f, 0.002f, 0.1f, W_FM, 1.5f, 3.0f); break;
+        case 300 + TH_BOOM: tone(0, 0.3f, 160, 60, 0.8f, 0.001f, 0.08f, W_SIN, 0, 0); for (int i = 0; i < 6; i++) noise(0.05f + 0.04f * (float)i, 0.02f, 6000, 3000, 1.0f, 0.5f, 0.001f, 0.008f, F_HP);
+                           twinkle(0.05f, 2349, 0.2f); break;
+        case 300 + TH_FROST: for (int i = 0; i < 5; i++) bell(0.04f * (float)i, 2600.0f + 400.0f * (float)((i * 2) % 5), 0.22f, 0.12f); break;
+        case 300 + TH_ZAP: tone(0, 0.15f, 1200, 2600, 0.3f, 0.001f, 0.06f, W_FM, 1.5f, 2.0f); twinkle(0.05f, 3136, 0.2f); break;
+        default: break;
+        }
+        finish_fx(base + slot, wet, room);
+        VOL[base + slot] = TH_VOL[slot];
+    }
+}
+
+static void magic_extras(void)
+{
+    begin(); gliss(0, C5, 12, 2.0f, 0.03f, 0.3f); for (int i = 0; i < 3; i++) bell(0.36f + 0.08f * (float)i, C7, 0.3f, 0.1f); finish_fx(SFX_MG_COMBO, 0.25f, 0.3f);
+    begin();                                                         /* wishing star: a falling whoosh, a shimmer, an "aah" chord */
+    noise(0, 0.6f, 6000, 800, 1.5f, 0.6f, 0.05f, 0.3f, F_BP); tone(0, 0.6f, 2400, 600, 0.25f, 0.01f, 0.3f, W_SIN, 0, 0);
+    for (int i = 0; i < 3; i++) tone(0.55f, 1.2f, (float[]){C5, E5, G5}[i], (float[]){C5, E5, G5}[i], 0.25f, 0.15f, 0.6f, W_SOFT, 1.0f, 0);
+    gliss(0.55f, C6, 10, 2.0f, 0.04f, 0.22f);
+    finish_fx(SFX_MG_SURGE, 0.35f, 0.6f);
+    begin();                                                         /* rainbow blast: a magical swirl rising into chimes */
+    tone(0, 0.8f, 300, 2400, 0.3f, 0.05f, 0.4f, W_FM, 1.01f, 3.0f); gliss(0.1f, C5, 16, 2.0f, 0.03f, 0.25f);
+    for (int i = 0; i < 4; i++) bell(0.7f + 0.07f * (float)i, (float[]){C6, E6, G6, C7}[i], 0.35f, 0.14f);
+    finish_fx(SFX_MG_BLAST, 0.3f, 0.5f);
+    begin(); noise(0, 0.25f, 2000, 9000, 1.2f, 0.4f, 0.01f, 0.08f, F_BP); twinkle(0.05f, 2637, 0.3f); twinkle(0.12f, 3520, 0.2f); finish_fx(SFX_MG_WARP, 0.2f, 0.3f);
+    begin();                                                         /* firework: whistle up, bang, crackle */
+    tone(0, 0.4f, 800, 2500, 0.25f, 0.02f, 0.2f, W_SIN, 0, 0);
+    tone(0.4f, 0.4f, 120, 40, 0.9f, 0.001f, 0.12f, W_SIN, 0, 0); noise(0.4f, 0.5f, 3000, 300, 0.8f, 0.7f, 0.001f, 0.12f, F_LP);
+    for (int i = 0; i < 10; i++) noise(0.5f + 0.035f * (float)i, 0.015f, 7000, 4000, 1.0f, 0.4f, 0.001f, 0.006f, F_HP);
+    finish_fx(SFX_MG_FIREWORK, 0.25f, 0.5f);
+    begin();                                                         /* perfect wave: the alarm bells go off */
+    for (int i = 0; i < 16; i++) bell(0.06f * (float)i, i & 1 ? 2093.0f : 2637.0f, 0.35f, 0.07f);
+    for (int i = 0; i < 3; i++) tone(0.96f, 0.8f, (float[]){C5, E5, G5}[i] * 2.0f, (float[]){C5, E5, G5}[i] * 2.0f, 0.2f, 0.01f, 0.4f, W_FM, 2.0f, 1.0f);
+    finish_fx(SFX_MG_PERFECT, 0.3f, 0.5f);
+    VOL[SFX_MG_COMBO] = 200; VOL[SFX_MG_SURGE] = 240; VOL[SFX_MG_BLAST] = 240; VOL[SFX_MG_WARP] = 130; VOL[SFX_MG_FIREWORK] = 200; VOL[SFX_MG_PERFECT] = 230;
+}
+
 void audio_init(void)
 {
     if (ready) return;
     ready = 1;
+    SFXPOOL = (int16_t *)memalign(32, sizeof(int16_t) * SFX_POOL);
+    if (!SFXPOOL) return;
     for (int i = 0; i <= TABN; i++) sine_tab[i] = sinf((float)i * 2.0f * (float)M_PI / (float)TABN);
 
     /* --- towers --- */
@@ -509,6 +682,19 @@ void audio_init(void)
     for (int i = 0; i < 4; i++) bell(0.9f + 0.07f * (float)i, (float[]){C6, E6, G6, C7}[i], 0.4f, 0.14f);
     finish_fx(SFX_PB_GIGA, 0.25f, 0.4f);
 
+    begin();                                                         /* perfect wave: the knocker (a free game!) and bells */
+    tone(0, 0.2f, 90, 60, 1.0f, 0.001f, 0.06f, W_SIN, 0, 0); noise(0, 0.05f, 1500, 800, 1.5f, 1.0f, 0.001f, 0.015f, F_BP);
+    tone(0.35f, 0.2f, 90, 60, 1.0f, 0.001f, 0.06f, W_SIN, 0, 0); noise(0.35f, 0.05f, 1500, 800, 1.5f, 1.0f, 0.001f, 0.015f, F_BP);
+    for (int i = 0; i < 12; i++) bell(0.6f + 0.05f * (float)i, i & 1 ? 1568.0f : 2093.0f, 0.3f, 0.06f);
+    finish_fx(SFX_PB_PERFECT, 0.2f, 0.3f);
+
+    /* --- each level's own set of everyday sounds --- */
+    theme_set(SFX_TH_AUTUMN, 0);
+    theme_set(SFX_TH_HALLOW, 1);
+    theme_set(SFX_TH_ISLAND, 2);
+    theme_set(SFX_TH_SKY, 3);
+    magic_extras();
+
     /* --- the sea --- */
     begin();                                                         /* wind gust: a swelling, whistling howl */
     noise(0.0f, 2.4f, 400, 1400, 3.0f, 0.8f, 0.7f, 0.9f, F_BP);
@@ -533,7 +719,7 @@ void audio_init(void)
     finish_fx(SFX_SPLASH, 0.2f, 0.3f);
 }
 
-const int16_t *audio_data(int id) { return &SFXPOOL[sfx_off[id]]; }
+const int16_t *audio_data(int id) { static const int16_t silence[16] __attribute__((aligned(32))) = {0}; return SFXPOOL ? &SFXPOOL[sfx_off[id]] : silence; }
 int            audio_pool_used(void) { return pool_used; }
 int            audio_len(int id)  { return sfx_len[id]; }
 int            audio_volume(int id) { return VOL[id]; }

@@ -17,7 +17,7 @@ static int   flat_on;
 static float flat_l[3];
 
 /* ---- static cache storage ---- */
-#define RC_MAXV 110000
+#define RC_MAXV 64000
 #define RC_MAXP 11000
 #define RC_SLOTS 32
 typedef struct { float x, y, sw, dx, dy; uint8_t r, g, b, a; uint16_t f, li; } CVtx;   /* sw: sway in pixels; dx,dy: stretch; f: face light x256 */

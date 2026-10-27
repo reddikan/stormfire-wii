@@ -69,6 +69,16 @@ const EnemyDef ENEMIES[EN_TYPES] = {
     { "ECHO",          80,  0.90f, 0.24f, 0,   5,   1,  0,   0, -1, 0,           0xC8A0FFFF,  0, 0, 0,     -1, 0, 0 },
     { "HOVER CAR",   1800,  0.32f, 0.58f, 0,  75,   3, 10,   0, -1, 0,           0x30D0C0FF,  0, 0, 0,     -1, 0, 0 },
     { "TIME TRAIN",  5600,  0.20f, 1.05f, 0, 450,  10,  9,   1, EN_PARADOX, 3,   0x384048FF,  0, 0, 0,     EN_DRONE, 2, 8.0f },
+    /* level 7: the enchanted kingdom's troublemakers */
+    { "CRAZY UNICORN", 260, 0.85f, 0.34f, 0,  16,   1,  0,   0, -1, 0,           0xF8F0FFFF,  0, 0, 0,     -1, 0, 0 },
+    { "LEPRECHAUN",   200,  0.72f, 0.26f, 0,  20,   1,  0,   0, -1, 0,           0x30A040FF,  0, 0, 0,     -1, 0, 0 },
+    { "FROG",         150,  0.70f, 0.26f, 0,   9,   1,  0,   0, -1, 0,           0x60C040FF,  0, 0, 0,     -1, 0, 0 },
+    { "PIXIE",        140,  1.05f, 0.24f, 1,  11,   1,  0,   0, -1, 0,           0xFF90E0FF,  0, 0, 0,     -1, 0, 0 },
+    { "TROLL",       1400,  0.34f, 0.55f, 0,  60,   3,  9,   0, -1, 0,           0x7A8A5AFF, 30, 1.2f, 2.4f,  -1, 0, 0 },
+    { "WITCH",        480,  0.55f, 0.34f, 0,  30,   1,  2,   0, -1, 0,           0x6A3A8AFF,  0, 0, 0,     -1, 0, 0 },
+    { "GINGERBREAD",  320,  0.65f, 0.34f, 0,  14,   1,  0,   0, EN_GINGERBIT, 3, 0xC07838FF,  0, 0, 0,     -1, 0, 0 },
+    { "GINGERBIT",     70,  0.95f, 0.20f, 0,   3,   1,  0,   0, -1, 0,           0xD08848FF,  0, 0, 0,     -1, 0, 0 },
+    { "DRAGON",      6500,  0.20f, 1.05f, 0, 500,  10, 10,   1, EN_PIXIE, 6,     0x8040C0FF,  0, 0, 0,     EN_PIXIE, 3, 8.0f },
 };
 
 const float TOWER_HP[TW_MAXLVL] = { 100, 150, 200 };
@@ -227,6 +237,32 @@ static const WaveDef WAVES6[] = {
     { 3, 8, 6.27f, { {EN_HOVERCAR, 7, C, 0, 2.8f}, {EN_HOVERBOARD, 28, C, 2, 0.35f}, {EN_PARADOX, 16, R, 6, 0.5f} } },
     { 6, 8, 6.59f, { {EN_TIMETRAIN, 1, 0, 4, 1.0f}, {EN_HOVERCAR, 3, C, 0, 6.0f}, {EN_SERVO, 16, C, 4, 0.8f}, {EN_PARADOX, 16, C, 8, 0.6f}, {EN_DRONE, 16, A, 12, 0.5f}, {EN_HOLOSHARK, 20, R, 16, 0.45f} } },
 };
+
+/* level 7: the enchanted kingdom - crazy unicorns that charge, leprechauns that blink ahead, hopping frogs, pixies,
+ * trolls, witches whose hexes jam towers, gingerbread men that crumble into gingerbits, and the Dragon */
+static const WaveDef WAVES7[] = {
+    /* n gates hp x  groups: {type, count, gate, delay, gap} */
+    { 2, 2, 0.90f, { {EN_FROG, 10, C, 0, 1.2f}, {EN_UNICORN, 3, C, 8, 2.5f} } },
+    { 2, 2, 1.18f, { {EN_PIXIE, 8, A, 0, 1.2f}, {EN_FROG, 8, C, 4, 1.0f} } },
+    { 2, 3, 1.49f, { {EN_LEPRECHAUN, 8, C, 0, 1.6f}, {EN_UNICORN, 4, C, 6, 2.0f} } },
+    { 2, 4, 1.87f, { {EN_GINGER, 6, C, 0, 1.8f}, {EN_PIXIE, 8, A, 5, 0.9f} } },
+    { 2, 4, 2.31f, { {EN_UNICORN, 10, C, 0, 1.0f}, {EN_FROG, 12, C, 4, 0.7f} } },
+    { 2, 5, 2.83f, { {EN_TROLL, 1, C, 0, 1.0f}, {EN_LEPRECHAUN, 12, C, 2, 0.8f} } },
+    { 3, 6, 3.43f, { {EN_WITCH, 3, C, 0, 3.0f}, {EN_GINGER, 8, C, 3, 1.0f}, {EN_PIXIE, 10, A, 8, 0.7f} } },
+    { 2, 6, 4.13f, { {EN_UNICORN, 16, C, 0, 0.7f}, {EN_FROG, 16, C, 3, 0.5f} } },
+    { 2, 8, 4.97f, { {EN_TROLL, 2, C, 0, 6.0f}, {EN_LEPRECHAUN, 14, C, 2, 0.7f} } },
+    { 3, 8, 5.93f, { {EN_GINGER, 12, C, 0, 0.8f}, {EN_WITCH, 4, C, 4, 2.5f}, {EN_PIXIE, 14, A, 8, 0.5f} } },
+    { 3, 8, 6.60f, { {EN_UNICORN, 22, C, 0, 0.45f}, {EN_TROLL, 2, C, 4, 6.0f}, {EN_FROG, 16, R, 8, 0.5f} } },
+    { 3, 8, 7.33f, { {EN_LEPRECHAUN, 20, C, 0, 0.5f}, {EN_PIXIE, 18, A, 3, 0.45f}, {EN_WITCH, 5, C, 8, 2.0f} } },
+    { 2, 8, 8.11f, { {EN_TROLL, 4, C, 0, 4.0f}, {EN_GINGER, 16, C, 2, 0.6f} } },
+    { 3, 8, 9.00f, { {EN_UNICORN, 24, C, 0, 0.4f}, {EN_WITCH, 6, C, 4, 1.8f}, {EN_PIXIE, 16, A, 8, 0.45f} } },
+    { 3, 8, 9.98f, { {EN_LEPRECHAUN, 24, C, 0, 0.4f}, {EN_TROLL, 3, C, 3, 5.0f}, {EN_FROG, 24, R, 8, 0.35f} } },
+    { 4, 8, 11.08f, { {EN_GINGER, 18, C, 0, 0.5f}, {EN_WITCH, 6, C, 3, 1.8f}, {EN_PIXIE, 20, A, 6, 0.4f}, {EN_TROLL, 2, C, 10, 5.0f} } },
+    { 3, 8, 12.22f, { {EN_TROLL, 6, C, 0, 3.0f}, {EN_UNICORN, 24, C, 2, 0.4f}, {EN_LEPRECHAUN, 18, R, 6, 0.4f} } },
+    { 4, 8, 13.52f, { {EN_WITCH, 8, C, 0, 1.6f}, {EN_GINGER, 20, C, 3, 0.45f}, {EN_PIXIE, 22, A, 6, 0.35f}, {EN_UNICORN, 18, R, 10, 0.4f} } },
+    { 3, 8, 14.87f, { {EN_TROLL, 8, C, 0, 2.5f}, {EN_LEPRECHAUN, 26, C, 2, 0.35f}, {EN_FROG, 24, R, 6, 0.35f} } },
+    { 6, 8, 9.60f, { {EN_DRAGON, 1, 0, 4, 1.0f}, {EN_TROLL, 3, C, 0, 6.0f}, {EN_WITCH, 6, C, 4, 2.0f}, {EN_UNICORN, 20, C, 8, 0.5f}, {EN_PIXIE, 18, A, 12, 0.5f}, {EN_GINGER, 16, R, 16, 0.5f} } },
+};
 #undef C
 #undef R
 #undef A
@@ -363,6 +399,31 @@ const LevelDef LEVELS[] = {
         8, { {4, 0}, {20, 16}, {26, 4}, {0, 12}, {22, 0}, {6, 16}, {26, 12}, {0, 4} },
         WAVES6, NW(WAVES6), ENV_FUTURE, 360,
     },
+    {   "CLOUD KINGDOM", "HERE BE DRAGONS!",
+        {   /* a kingdom in the clouds: two rainbow ring roads, fluffy cloud banks and candy gems to build on,
+             * and the princess's castle in the middle */
+            "TTTTTTTT.TTTTTTTTT.TTTTTTTT",
+            "TL######.#########.######yT",
+            "To#.....................#,T",
+            "T,#.#########.#########.#mT",
+            "T##.#pb######.######,L#.##T",
+            "....#,b#...........#pp#....",
+            "T##.#o,#.#########.#,,#.##T",
+            "Tr#.#,p#.#L#FFF#L#.#oo#.#bT",
+            "T,#.#c,#....FFF....#,c#.#,T",
+            "Ty#.#co#.#L#FFF#L#.#c,#.#pT",
+            "T##.#,,#.#########.#,r#.##T",
+            "....#rc#...........#r,#....",
+            "T##.#L,######.######yy#.##T",
+            "Tg#.#########.#########.#,T",
+            "T,#.....................#rT",
+            "Tb######.#########.######LT",
+            "TTTTTTTT.TTTTTTTTT.TTTTTTTT",
+        },
+        /* N, S, E, W, NE, SE, far W, far E */
+        8, { {8, 0}, {8, 16}, {26, 5}, {0, 11}, {18, 0}, {18, 16}, {0, 5}, {26, 11} },
+        WAVES7, NW(WAVES7), ENV_SKY, 380,
+    },
 };
 const int NUM_LEVELS = NW(LEVELS);
 
@@ -405,6 +466,10 @@ void map_load(Game *g)
                 for (int i = 0; i < BC_COUNT; i++) if (cols[i] == ch) t->color = (uint8_t)i;
                 break;
             }
+            }
+            if (g->lv->env == ENV_SKY) {                /* soft cloud banks and candy gems */
+                if (t->kind == TL_WALL) t->h = 0.3f;
+                else if (t->kind == TL_BLOCK) t->h = 0.45f;
             }
             if (g->lv->env == ENV_FUTURE) {             /* low kerbs and crates in the town square */
                 if (t->kind == TL_WALL) t->h = 0.2f;

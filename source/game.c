@@ -43,10 +43,45 @@ static int pinball_sfx(int id)
     }
 }
 
+/* levels 2, 3, 4 and 7 have their own version of the everyday sounds */
+static int theme_slot(int id)
+{
+    switch (id) {
+    case SFX_POP: return TH_POP;         case SFX_CRUNCH: return TH_CRUNCH;   case SFX_BUILD: return TH_BUILD;
+    case SFX_UPGRADE: return TH_UPGRADE; case SFX_SELL: return TH_SELL;       case SFX_WAVE: return TH_WAVE;
+    case SFX_CLEAR: return TH_CLEAR;     case SFX_BOSS: return TH_BOSS;       case SFX_HISS: return TH_LEAK;
+    case SFX_WIN: return TH_WIN;         case SFX_LOSE: return TH_LOSE;       case SFX_COIN: return TH_COIN;
+    case SFX_SELECT: return TH_SELECT;   case SFX_BLASTER: return TH_BLASTER; case SFX_MORTAR: return TH_MORTAR;
+    case SFX_BOOM: return TH_BOOM;       case SFX_FROST: return TH_FROST;     case SFX_ZAP: return TH_ZAP;
+    case SFX_START: return TH_WAVE;
+    default: return -1;
+    }
+}
+
+static int level_sfx(const Game *g, int id)
+{
+    int env = g->lv->env, base = -1;
+    if (env == ENV_FUTURE) return pinball_sfx(id);
+    if (env == ENV_SKY) {                      /* the magic versions of the pinball moments */
+        switch (id) {
+        case SFX_PB_COMBO: return SFX_MG_COMBO;   case SFX_PB_SURGE: return SFX_MG_SURGE;
+        case SFX_PB_GIGA: return SFX_MG_BLAST;    case SFX_PB_WARP: return SFX_MG_WARP;
+        case SFX_PB_PERFECT: return SFX_MG_PERFECT;
+        default: break;
+        }
+    }
+    if (env == ENV_AUTUMN) base = SFX_TH_AUTUMN;
+    else if (env == ENV_HALLOW) base = SFX_TH_HALLOW;
+    else if (env == ENV_ISLAND) base = SFX_TH_ISLAND;
+    else if (env == ENV_SKY) base = SFX_TH_SKY;
+    int slot = base >= 0 ? theme_slot(id) : -1;
+    return slot >= 0 ? base + slot : id;
+}
+
 static void snd(Game *g, int id, int pitch, float x)
 {
     if (g->mute || g->snd_n >= SND_Q) return;
-    if (g->lv->env == ENV_FUTURE) id = pinball_sfx(id);
+    id = level_sfx(g, id);
     g->snd_id[g->snd_n] = id;
     g->snd_pitch[g->snd_n] = pitch;
     g->snd_pan[g->snd_n] = clampf((x - FIRE_X) / 11.0f, -0.8f, 0.8f);
@@ -206,7 +241,7 @@ static float wave_hpmul(const Game *g)
 /* ghosts fade out of reach for a moment; a collapsed skeleton is just a heap of bones */
 static int untouchable(const Enemy *e)
 {
-    return ((e->type == EN_GHOST || e->type == EN_SHARK || e->type == EN_KRAKEN || e->type == EN_HOLOSHARK || e->type == EN_TIMETRAIN) && e->dash_t > 0)
+    return ((e->type == EN_GHOST || e->type == EN_SHARK || e->type == EN_KRAKEN || e->type == EN_HOLOSHARK || e->type == EN_TIMETRAIN || e->type == EN_LEPRECHAUN) && e->dash_t > 0)
            || e->down_t > 0;
 }
 
@@ -228,7 +263,7 @@ static void set_target(Game *g, Enemy *e)
 
 static void pinball_reset(Game *g)
 {
-    g->score = 0; g->combo = 0; g->combo_t = 0; g->mph = 0; g->surge_t = 0; g->giga_t = 22.0f; g->giga_fx = 0;
+    g->score = 0; g->combo = 0; g->combo_t = 0; g->mph = 0; g->surge_t = 0; g->giga_t = 22.0f; g->giga_fx = 0; g->fw_t = 0;
     g->warp_cd = 0; g->tilt_cd = 0; g->dmd_t = 99.0f;
     for (int i = 0; i < MAX_TRAIL; i++) g->trail[i].t = g->trail[i].life = 0;
 }
@@ -262,6 +297,20 @@ static void add_trail(Game *g, float x0, float z0, float x1, float z1, float lif
 static void time_arrive(Game *g, float x, float z, float dx, float dz, int big, float y)
 {
     float k = big ? 1.6f : 1.0f;
+    if (g->lv->env == ENV_SKY) {
+        /* level 7: they pop in with a puff of glitter and a burst of stars */
+        static const uint32_t PC[4] = { 0xFF90E0FF, 0xFFE070FF, 0x90E0FFFF, 0xC0A0FFFF };
+        flight(g, x, y + 0.5f, z, 0xFFB0F0FF, 1.2f * k, 2.5f * k, 0.3f);
+        ring(g, x, 0.05f, z, 0.1f, 1.1f * k, 0.4f, 0xFFB0F0E0);
+        for (int i = 0; i < (big ? 24 : 12); i++) {
+            Part *s = part(g, PT_EMBER, x + frand2(g) * 0.3f, y + 0.3f + frand(g) * 0.3f, z + frand2(g) * 0.3f);
+            s->vx = frand2(g) * 1.5f; s->vz = frand2(g) * 1.5f; s->vy = 0.5f + frand(g);
+            s->life = s->max = 0.6f + frand(g) * 0.4f; s->size = 0.06f; s->c = PC[i & 3];
+        }
+        if (g->warp_cd <= 0) { snd(g, SFX_PB_WARP, 118 + (int)(frand(g) * 20), x); g->warp_cd = 0.45f; }
+        if (big) g->shake = fmaxf(g->shake, 0.4f);
+        return;
+    }
     flight(g, x, y + 0.5f, z, 0xB0D8FFFF, 1.6f * k, 3.0f * k, 0.35f);
     ring(g, x, 0.05f, z, 0.1f, 1.3f * k, 0.45f, 0xA0D0FFE0);
     sparks(g, x, y + 0.4f, z, big ? 26 : 12, 0xD0F0FFFF, 3.0f);
@@ -303,16 +352,18 @@ static void spawn_enemy(Game *g, int type, int gate)
     e->anim = frand(g) * 10.0f;
     e->lane = frand2(g) * (d->boss ? 0.0f : 0.17f);
     if (d->boss) g->boss = slot;
-    if (type == EN_FOX) e->dash_t = -(0.5f + frand(g) * 2.0f);
+    if (type == EN_FOX || type == EN_UNICORN) e->dash_t = -(0.5f + frand(g) * 2.0f);
     if (d->summon_n > 0) e->spawn_t = d->summon_every;
     if (type == EN_GHOST) e->dash_t = -(1.0f + frand(g) * 1.5f);
-    if (type == EN_SPRINGER) e->dash_t = -(0.3f + frand(g) * 0.6f);
+    if (type == EN_SPRINGER || type == EN_FROG) e->dash_t = -(0.3f + frand(g) * 0.6f);
     if (type == EN_TINKER) e->heal_t = 1.5f + frand(g);
     if (type == EN_ARCHITECT) e->pulse_t = 6.0f;
     if (type == EN_SHARK) e->dash_t = -(1.5f + frand(g) * 2.0f);
     if (type == EN_KRAKEN) e->dash_t = -7.0f;
     if (type == EN_SHIP) e->pulse_t = 3.0f + frand(g) * 2.0f;
-    if (type == EN_HOVERCAR) e->pulse_t = 4.0f + frand(g) * 2.0f;
+    if (type == EN_HOVERCAR || type == EN_WITCH) e->pulse_t = 4.0f + frand(g) * 2.0f;
+    if (type == EN_DRAGON) e->pulse_t = 6.0f;
+    if (type == EN_LEPRECHAUN) e->pulse_t = 2.0f + frand(g) * 2.0f;
     if (type == EN_HOLOSHARK) e->dash_t = -(1.5f + frand(g) * 1.5f);
     if (type == EN_TIMETRAIN) e->pulse_t = 9.0f;
     e->smash_t = 1.0f;
@@ -323,7 +374,7 @@ static void spawn_enemy(Game *g, int type, int gate)
         e->tx = FIRE_X; e->tz = FIRE_Z;
         e->ang = atan2f(FIRE_Z - e->z, FIRE_X - e->x);
         e->prog = 20.0f;
-        if (g->lv->env == ENV_FUTURE) time_arrive(g, e->x, e->z, cosf(e->ang), sinf(e->ang), 0, e->y);
+        if (PINBALL_ENV(g)) time_arrive(g, e->x, e->z, cosf(e->ang), sinf(e->ang), 0, e->y);
         return;
     }
     int gc = g->lv->gates[gate][0], gr = g->lv->gates[gate][1];
@@ -335,7 +386,7 @@ static void spawn_enemy(Game *g, int type, int gate)
     e->tx = (float)gc + 0.5f; e->tz = (float)gr + 0.5f;
     e->ang = atan2f(-oz, -ox);
     e->prog = (float)g->dist[gr][gc] + 2.0f;
-    if (g->lv->env == ENV_FUTURE) time_arrive(g, e->x, e->z, -ox, -oz, d->boss || type == EN_HOVERCAR, 0.3f);
+    if (PINBALL_ENV(g)) time_arrive(g, e->x, e->z, -ox, -oz, d->boss || type == EN_HOVERCAR || type == EN_TROLL, 0.3f);
 }
 
 static void leak(Game *g, Enemy *e, int idx)
@@ -349,7 +400,14 @@ static void leak(Game *g, Enemy *e, int idx)
     g->shake = fmaxf(g->shake, dmg >= 10 ? 0.9f : 0.3f);
     e->alive = 0;
     if (idx == g->boss) g->boss = -1;
-    if (g->lv->env == ENV_FUTURE) {
+    if (g->lv->env == ENV_SKY) {
+        /* they got into the castle: hearts break, the bells clang - OH NO! */
+        sparks(g, FIRE_X, 1.2f, FIRE_Z, 18, 0xFF80C0FF, 2.5f);
+        ring(g, FIRE_X, 0.1f, FIRE_Z, 0.2f, 1.8f, 0.4f, 0xFF5080D0);
+        flight(g, FIRE_X, 1.0f, FIRE_Z, 0xFF70A0FF, 1.2f, 3.0f, 0.3f);
+        g->combo = 0; g->combo_t = 0;
+        if (g->tilt_cd <= 0) { dmd(g, "OH NO!", "THE CASTLE!", 0xFF5080FF); snd(g, SFX_HISS, 128, e->x); g->tilt_cd = 3.0f; }
+    } else if (g->lv->env == ENV_FUTURE) {
         /* they reached the time machine: sparks fly from the flux capacitor - TILT! */
         sparks(g, FIRE_X, 0.7f, FIRE_Z, 18, 0x90D0FFFF, 2.5f);
         ring(g, FIRE_X, 0.1f, FIRE_Z, 0.2f, 1.6f, 0.4f, 0xFF5050D0);
@@ -434,8 +492,24 @@ static void time_surge(Game *g)
         if (o->hp < 1.0f) o->hp = 1.0f;
         o->hit_t = 0.2f;
     }
-    g->gold += 88; g->gold_flash = 1.0f;
-    g->score += 880000;
+    int sky = g->lv->env == ENV_SKY;
+    g->gold += sky ? 77 : 88; g->gold_flash = 1.0f;
+    g->score += sky ? 770000 : 880000;
+    if (sky) {
+        /* a wishing star streaks down onto the castle and a rainbow ripples out */
+        float top[3] = { FIRE_X + 6.0f, 9.0f, FIRE_Z - 6.0f }, bot[3] = { FIRE_X, 2.6f, FIRE_Z };
+        make_arc(g, top, bot, 0xFFF0B0FF, 0.5f, 1, 0.1f);
+        static const uint32_t RB[6] = { 0xFF5060E0, 0xFFA040E0, 0xFFF060E0, 0x60F070E0, 0x60A0FFE0, 0xC070FFE0 };
+        for (int k = 0; k < 6; k++) ring(g, FIRE_X, 0.1f + 0.05f * (float)k, FIRE_Z, 0.3f, (float)MW * (0.45f + 0.05f * (float)k), 1.2f + 0.08f * (float)k, RB[k]);
+        flight(g, FIRE_X, 1.5f, FIRE_Z, 0xFFE0F0FF, 3.0f, 8.0f, 0.8f);
+        sparks(g, FIRE_X, 2.5f, FIRE_Z, 50, 0xFFF0C0FF, 4.0f);
+        g->fw_t = fmaxf(g->fw_t, 1.5f);
+        g->shake = fmaxf(g->shake, 0.7f);
+        g->punch = 1.0f;
+        dmd(g, "WISHING STAR!", "WISH GRANTED +77", 0xFFE070FF);
+        snd(g, SFX_PB_SURGE, 128, FIRE_X);
+        return;
+    }
     ring(g, FIRE_X, 0.1f, FIRE_Z, 0.3f, (float)MW * 0.7f, 1.3f, 0x90D8FFE0);
     ring(g, FIRE_X, 0.6f, FIRE_Z, 0.2f, (float)MW * 0.5f, 1.0f, 0xFFFFFFB0);
     flight(g, FIRE_X, 1.0f, FIRE_Z, 0xA0D0FFFF, 3.0f, 8.0f, 0.8f);
@@ -463,11 +537,11 @@ static void pinball_kill(Game *g, const Enemy *e, const EnemyDef *d)
     if (g->combo >= 5 && g->combo % 5 == 0) {
         char l2[48];
         snprintf(l2, sizeof l2, "x%d  +%d GOLD", mult, g->combo / 5 * 5);
-        dmd(g, "COMBO!", l2, 0xFF60D0FF);
+        dmd(g, g->lv->env == ENV_SKY ? "MAGIC COMBO!" : "COMBO!", l2, 0xFF60D0FF);
         g->gold += g->combo / 5 * 5; g->gold_flash = 1.0f;
         snd(g, SFX_PB_COMBO, 120 + (g->combo / 5) * 4, e->x);
     }
-    if (++g->mph >= 88) { g->mph = 0; time_surge(g); }
+    if (++g->mph >= (g->lv->env == ENV_SKY ? 77 : 88)) { g->mph = 0; time_surge(g); }
 }
 
 static void hurt(Game *g, int idx, float dmg);
@@ -475,6 +549,37 @@ static void hurt(Game *g, int idx, float dmg);
 /* level 6: lightning strikes the clock tower - 1.21 gigawatts arc out to the visitors */
 static void giga_strike(Game *g)
 {
+    if (g->lv->env == ENV_SKY) {
+        /* level 7: the castle's magic orb flares and rainbows leap out to strike the troublemakers */
+        static const uint32_t RB[6] = { 0xFF6070FF, 0xFFB050FF, 0xFFF070FF, 0x70F080FF, 0x70B0FFFF, 0xD080FFFF };
+        float orb[3] = { FIRE_X, 2.75f, FIRE_Z };
+        int zapped = 0;
+        for (int k = 0; k < 6; k++) {
+            int best = -1; float bd = 1e9f;
+            for (int i = 0; i < MAX_EN; i++) {
+                Enemy *o = &g->en[i];
+                if (!o->alive || o->entering || untouchable(o) || o->zap_t > 0.5f) continue;
+                float dx = o->x - FIRE_X, dz = o->z - FIRE_Z, dd = dx * dx + dz * dz + frand(g) * 30.0f;
+                if (dd < bd) { bd = dd; best = i; }
+            }
+            if (best < 0) break;
+            Enemy *o = &g->en[best];
+            float to[3] = { o->x, o->y + 0.4f, o->z };
+            make_arc(g, orb, to, RB[k], 0.6f, 0, 0.25f);
+            o->zap_t = 0.6f;
+            sparks(g, o->x, o->y + 0.3f, o->z, 10, RB[k], 2.5f);
+            hurt(g, best, o->maxhp * (ENEMIES[o->type].boss ? 0.04f : 0.3f));
+            zapped++;
+        }
+        sparks(g, orb[0], orb[1], orb[2], 30, 0xFFE0F8FF, 3.5f);
+        flight(g, orb[0], orb[1], orb[2], 0xFFD0F0FF, 3.0f, 6.0f, 0.7f);
+        g->giga_fx = 2.0f;
+        g->shake = fmaxf(g->shake, 0.5f);
+        g->score += 121000L * (zapped + 1);
+        dmd(g, "RAINBOW", "BLAST!", 0xFF90E0FF);
+        snd(g, SFX_PB_GIGA, 128, FIRE_X);
+        return;
+    }
     int cc = -1, cr = -1;
     for (int r = 0; r < MH; r++) for (int c = 0; c < MW; c++)
         if (g->tile[r][c].kind == TL_GRAVE && g->tile[r][c].color == DECO_CLOCK) { cc = c; cr = r; }
@@ -545,7 +650,7 @@ static void hurt(Game *g, int idx, float dmg)
     e->alive = 0;
     g->kills++;
     const EnemyDef *d = &ENEMIES[e->type];
-    if (g->lv->env == ENV_FUTURE) pinball_kill(g, e, d);
+    if (PINBALL_ENV(g)) pinball_kill(g, e, d);
     for (int k = 0; k < d->split_n; k++) spawn_child(g, e, d->split_type);
     g->gold += d->bounty;
     g->gold_flash = 1.0f;
@@ -623,12 +728,19 @@ static void update_enemies(Game *g, float dt)
         if (e->slow_t > 0) { e->slow_t -= dt; if (e->slow_t <= 0) e->slow_amt = 0; }
         float spd = e->speed * (1.0f - e->slow_amt);
         if (e->type == EN_TIMETRAIN && e->dash_t > 0) spd = e->speed * 9.0f;      /* mid time-jump */
-        if (e->type == EN_FOX) {
+        if (e->type == EN_LEPRECHAUN && e->dash_t > 0) spd = e->speed * 11.0f;    /* mid blink */
+        if (e->type == EN_FOX || e->type == EN_UNICORN) {
             /* foxes trot, then sprint for a moment */
             if (e->dash_t > 0) {
                 e->dash_t -= dt;
                 spd *= 2.6f;
-                if (frand(g) < dt * 20.0f) {
+                if (e->type == EN_UNICORN) {             /* a crazy unicorn charges in a shower of rainbow sparkles */
+                    if (frand(g) < dt * 40.0f) {
+                        static const uint32_t RB[6] = { 0xFF5050FF, 0xFFA040FF, 0xFFF060FF, 0x60F070FF, 0x60A0FFFF, 0xC070FFFF };
+                        Part *p = part(g, PT_EMBER, e->x + frand2(g) * 0.15f, 0.2f + frand(g) * 0.3f, e->z + frand2(g) * 0.15f);
+                        p->vy = 0.4f; p->life = p->max = 0.5f; p->size = 0.06f; p->c = RB[(int)(frand(g) * 5.99f)];
+                    }
+                } else if (frand(g) < dt * 20.0f) {
                     Part *p = part(g, PT_SMOKE, e->x, 0.05f, e->z);
                     p->vy = 0.2f; p->life = p->max = 0.4f; p->size = 0.12f; p->c = 0xB89A7090;
                 }
@@ -650,7 +762,7 @@ static void update_enemies(Game *g, float dt)
                 snd(g, e->type == EN_GHOULKING ? SFX_CRUNCH : SFX_POP, 80, e->x);
             }
         }
-        if (e->type == EN_SPRINGER) {
+        if (e->type == EN_SPRINGER || e->type == EN_FROG) {
             /* crouch... then a big hop down the path */
             if (e->dash_t > 0) {
                 e->dash_t -= dt;
@@ -739,6 +851,54 @@ static void update_enemies(Game *g, float dt)
                 flight(g, e->x, 0.8f, e->z, 0xFFB060FF, 1.8f, 3.0f, 0.3f);
                 g->shake = fmaxf(g->shake, hit ? 0.6f : 0.4f);
                 snd(g, SFX_CANNON, 120 + (int)(frand(g) * 20), e->x);
+            }
+        }
+        if ((e->type == EN_WITCH || e->type == EN_DRAGON) && !e->entering) {
+            /* a witch's hex (or the dragon's fire breath) jams the towers around it for a moment */
+            e->pulse_t -= dt;
+            if (e->pulse_t <= 0) {
+                int dragon = e->type == EN_DRAGON;
+                e->pulse_t = dragon ? 7.5f : 6.0f + frand(g) * 2.0f;
+                float rad = dragon ? 3.2f : 2.2f;
+                int hit = jam_towers(g, e->x, e->z, rad, dragon ? 2.2f : 1.6f, dragon ? 0xFF8030FF : 0xC060FFFF);
+                ring(g, e->x, 0.08f, e->z, 0.2f, rad, 0.6f, dragon ? 0xFF6020E0 : 0xB050FFE0);
+                if (dragon) {
+                    for (int k = 0; k < 24; k++) {           /* a gout of fire */
+                        float a = e->ang + frand2(g) * 0.7f, sp = 2.0f + frand(g) * 2.5f;
+                        Part *p = part(g, PT_FIRE, e->x + cosf(e->ang) * 0.9f, 0.9f, e->z + sinf(e->ang) * 0.9f);
+                        p->vx = cosf(a) * sp; p->vz = sinf(a) * sp; p->vy = frand2(g) * 0.6f;
+                        p->life = p->max = 0.5f + frand(g) * 0.3f; p->size = 0.25f + frand(g) * 0.15f;
+                    }
+                    flight(g, e->x, 0.9f, e->z, 0xFF8030FF, 2.0f, 4.0f, 0.4f);
+                    snd(g, SFX_BOSS, 150, e->x);
+                } else {
+                    for (int k = 0; k < 12; k++) {           /* green-purple hex sparkles */
+                        Part *p = part(g, PT_EMBER, e->x + frand2(g) * rad * 0.7f, 0.3f + frand(g) * 0.6f, e->z + frand2(g) * rad * 0.7f);
+                        p->vy = 0.5f; p->life = p->max = 0.7f; p->size = 0.07f; p->c = (k & 1) ? 0x90FF60FF : 0xC060FFFF;
+                    }
+                    snd(g, SFX_ZAP, 90, e->x);
+                }
+                g->shake = fmaxf(g->shake, hit ? 0.5f : 0.3f);
+            }
+        }
+        if (e->type == EN_LEPRECHAUN && !e->entering) {
+            /* blink! a puff of clover and gold, and he pops up a few steps further on */
+            if (e->dash_t > 0) {
+                e->dash_t -= dt;
+                if (e->dash_t <= 0) {
+                    e->dash_t = 0;
+                    sparks(g, e->x, 0.3f, e->z, 10, 0x60F060FF, 1.8f);
+                    sparks(g, e->x, 0.3f, e->z, 6, 0xFFD040FF, 1.5f);
+                    ring(g, e->x, 0.05f, e->z, 0.05f, 0.6f, 0.3f, 0x80FF80C0);
+                }
+            } else {
+                e->pulse_t -= dt;
+                if (e->pulse_t <= 0 && e->prog > 3.0f) {
+                    e->pulse_t = 3.0f + frand(g) * 2.0f;
+                    e->dash_t = 0.2f;
+                    sparks(g, e->x, 0.3f, e->z, 10, 0x60F060FF, 1.8f);
+                    snd(g, SFX_PB_WARP, 150, e->x);
+                }
             }
         }
         if (e->type == EN_HOVERCAR && !e->entering) {
@@ -905,9 +1065,13 @@ static void start_wave(Game *g)
         snprintf(g->banner2, sizeof g->banner2, "HERE COMES THE %s WAVE!!", o);
     }
     snd(g, g->wave == g->lv->nwaves ? SFX_BOSS : SFX_WAVE, 128, FIRE_X);
+    g->wave_leaks = g->leaked;
     if (g->lv->env == ENV_FUTURE) {
         if (g->wave == g->lv->nwaves) dmd(g, "GREAT SCOTT!", "THE TIME TRAIN!", 0xFFC040FF);
         else { char l2[48]; snprintf(l2, sizeof l2, "WAVE %d", g->wave); dmd(g, "BALL LAUNCH", l2, 0xFFA030FF); }
+    } else if (g->lv->env == ENV_SKY) {
+        if (g->wave == g->lv->nwaves) dmd(g, "HERE BE", "DRAGONS!", 0xFF70C0FF);
+        else { char l2[48]; snprintf(l2, sizeof l2, "WAVE %d", g->wave); dmd(g, "ONCE UPON A TIME", l2, 0xFF90E0FF); }
     }
 }
 
@@ -940,11 +1104,16 @@ static void update_waves(Game *g, float dt)
     int bonus = 15 + g->wave * 4;
     g->gold += bonus;
     g->gold_flash = 1.0f;
-    if (g->lv->env == ENV_FUTURE) {
+    if (PINBALL_ENV(g)) {
         char l2[48];
-        snprintf(l2, sizeof l2, "+%d GOLD", bonus);
-        g->score += 50000L * g->wave;
-        dmd(g, g->wave >= g->lv->nwaves ? "SUPER JACKPOT!" : "JACKPOT!", l2, 0xFFD040FF);
+        int perfect = g->leaked == g->wave_leaks;
+        if (perfect) { bonus += 25; g->gold += 25; }                /* not one got through: a bonus, and all the bells */
+        snprintf(l2, sizeof l2, perfect ? "PERFECT! +%d GOLD" : "+%d GOLD", bonus);
+        g->score += 50000L * g->wave * (perfect ? 2 : 1);
+        int sky = g->lv->env == ENV_SKY;
+        dmd(g, g->wave >= g->lv->nwaves ? (sky ? "HAPPILY EVER AFTER" : "SUPER JACKPOT!") : (sky ? "ROYAL JACKPOT!" : "JACKPOT!"), l2, sky ? 0xFFC0F0FF : 0xFFD040FF);
+        if (perfect) snd(g, SFX_PB_PERFECT, 128, FIRE_X);
+        if (sky) g->fw_t = perfect ? 4.0f : 2.5f;                  /* fireworks over the castle */
         for (int k = 0; k < 24; k++) {               /* a fountain of coins from the time machine */
             Part *p = part(g, PT_DEBRIS, FIRE_X + frand2(g) * 0.3f, 0.8f, FIRE_Z + frand2(g) * 0.3f);
             p->vx = frand2(g) * 2.0f; p->vz = frand2(g) * 2.0f; p->vy = 3.0f + frand(g) * 2.0f;
@@ -1346,7 +1515,7 @@ static void update_leaves(Game *g, float dt)
 
 static void update_rain(Game *g, float dt)
 {
-    if (g->lv->env == ENV_HALLOW || g->lv->env == ENV_ISLAND || g->lv->env == ENV_FUTURE) return;
+    if (g->lv->env == ENV_HALLOW || g->lv->env == ENV_ISLAND || g->lv->env == ENV_FUTURE || g->lv->env == ENV_SKY) return;
     if (g->lv->env == ENV_AUTUMN) { update_leaves(g, dt); return; }
     float push = (g->wind + g->gust * 3.0f) * 2.2f;
     for (int i = 0; i < MAX_DROP; i++) {
@@ -1420,8 +1589,26 @@ static void update_storm(Game *g, float dt)
         else g->gust -= dt * 0.45f;
         if (g->gust < 0) g->gust = 0;
     }
-    if (g->lv->env == ENV_FUTURE) {
-        /* the town square: a dry thunderstorm, the clock tower drawing a 1.21 gigawatt bolt now and then */
+    if (PINBALL_ENV(g)) {
+        /* the town square: a dry thunderstorm, the clock tower drawing a 1.21 gigawatt bolt now and then;
+         * the kingdom: a rainbow blast from the castle now and then, fireworks after a wave */
+        if (g->fw_t > 0) {
+            g->fw_t -= dt;
+            if (frand(g) < dt * 3.0f) {
+                static const uint32_t FW[6] = { 0xFF5080FF, 0xFFD040FF, 0x60F0A0FF, 0x60B0FFFF, 0xD070FFFF, 0xFFFFFFFF };
+                uint32_t c = FW[(int)(frand(g) * 5.99f)];
+                float fx = FIRE_X + frand2(g) * 3.0f, fy = 3.0f + frand(g) * 1.5f, fz = FIRE_Z - 1.0f + frand2(g) * 2.0f;
+                for (int k = 0; k < 28; k++) {
+                    float a = frand(g) * TAU, b = frand2(g), sp = 2.0f + frand(g) * 1.5f;
+                    Part *p = part(g, PT_SPARK, fx, fy, fz);
+                    p->vx = cosf(a) * sp * sqrtf(1 - b * b); p->vz = sinf(a) * sp * sqrtf(1 - b * b); p->vy = b * sp;
+                    p->life = p->max = 0.8f + frand(g) * 0.4f; p->c = c;
+                }
+                Part *p = part(g, PT_GLOW, fx, fy, fz);
+                p->life = p->max = 0.3f; p->size = 0.9f; p->c = c;
+                snd(g, SFX_MG_FIREWORK, 110 + (int)(frand(g) * 40), fx);
+            }
+        }
         g->combo_t -= dt; if (g->combo_t < 0) g->combo_t = 0;
         g->surge_t -= dt; g->giga_fx -= dt; g->warp_cd -= dt; g->tilt_cd -= dt;
         g->dmd_t += dt;
@@ -1475,6 +1662,17 @@ static void update_fire(Game *g, float dt)
     if (g->state == ST_TITLE) want = 1.0f;
     g->fire_vis += (want - g->fire_vis) * clampf(dt * 2.0f, 0, 1);
     g->fire_hit -= dt * 1.5f; if (g->fire_hit < 0) g->fire_hit = 0;
+    if (g->lv->env == ENV_SKY) {
+        /* the castle: glitter drifting up round its towers, and the magic orb on top shedding sparkles */
+        static const uint32_t PC[5] = { 0xFFB0F0FF, 0xFFF0A0FF, 0xB0E8FFFF, 0xD0B0FFFF, 0xFFFFFFFF };
+        if (frand(g) < dt * 18.0f * g->fire_vis) {
+            float a = frand(g) * TAU, rr = 0.6f + frand(g) * 0.9f;
+            Part *p = part(g, PT_EMBER, FIRE_X + cosf(a) * rr, 0.3f + frand(g) * 1.5f, FIRE_Z + sinf(a) * rr);
+            p->vx = frand2(g) * 0.15f; p->vz = frand2(g) * 0.15f; p->vy = 0.25f + frand(g) * 0.4f;
+            p->life = p->max = 1.2f + frand(g) * 1.0f; p->size = 0.04f + frand(g) * 0.03f; p->c = PC[(int)(frand(g) * 4.99f)];
+        }
+        return;
+    }
     if (g->lv->env == ENV_PIRATE) {
         /* the treasure: glints of gold sparkle up out of the open chest (fewer as it is plundered) */
         if (g->fire_vis > 0.05f && frand(g) < dt * 14.0f * g->fire_vis) {
@@ -1521,6 +1719,7 @@ static void new_game(Game *g)
     g->state = ST_PLAY;
     pinball_reset(g);
     if (g->lv->env == ENV_FUTURE) dmd(g, "INSERT COIN", "1.21 GIGAWATTS!", 0xFFA030FF);
+    if (g->lv->env == ENV_SKY) dmd(g, "ONCE UPON A TIME", "PROTECT THE CASTLE!", 0xFF90E0FF);
 }
 
 /* switch to a level and show it behind the title screen (with a few towers on it) */
@@ -1566,8 +1765,7 @@ void game_init(Game *g)
 {
     memset(g, 0, sizeof *g);
     g->rng = 0x9E3779B9u;
-    audio_init();
-    music_init();
+    audio_init();                       /* (the music is composed by the platform layer, in the background) */
     game_set_level(g, 0);
 }
 

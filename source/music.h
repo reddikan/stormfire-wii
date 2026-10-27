@@ -13,6 +13,7 @@
  *                      swells, timpani and a bodhran, with the gale howling underneath
  *   5  88 MPH        - driving 80s synthwave: pumping octave bass, sixteenth arpeggios, gated snare and a heroic
  *                      brass-synth lead
+ *   6  Cloud Kingdom - a fairy-tale waltz: harp ripples, a flute tune doubled on glockenspiel, celesta, oom-pah-pah
  */
 #ifndef MUSIC_H
 #define MUSIC_H
@@ -20,9 +21,14 @@
 #include <stdint.h>
 
 #define MUS_RATE   22050
-#define MUS_TRACKS 6
+#define MUS_TRACKS 7
 
 void           music_init(void);            /* compose + render every track (call once) */
+/* or compose them one at a time (e.g. on a background thread), wanted track first: */
+int            music_next(int prefer);       /* track to compose next, -1 when all are done */
+void           music_render(int track);      /* compose it */
+void           music_set_ready(int track);   /* mark it playable (after flushing it to memory the DSP can read) */
+int            music_ready(int track);
 const int16_t *music_data(int track);
 int            music_len(int track);        /* samples, a multiple of 16 */
 int            music_volume(int track);     /* suggested playback volume 0..255 */

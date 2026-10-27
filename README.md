@@ -36,7 +36,7 @@ Pick a level on the title screen with left / right. Winning a level takes you st
    - **Parrot** - flies straight at the treasure
    - **Pirate Ship** - big and armoured; its cannon broadsides jam every tower alongside for a moment
    - **Kraken** - the boss: a vast head and eight writhing tentacles; it dives out of reach now and then and calls up sharks as it comes
-6. **88 MPH** - a time-travel town square at night: neon-lit streets, a clock tower stopped at 10:04, street lamps, and the time machine parked in the middle - a stainless gull-wing car on hover pods with its flux capacitor pulsing. Visitors from the future arrive through time portals at eight gates in a white flash, leaving twin trails of fire on the road. Every so often lightning strikes the clock tower - **1.21 gigawatts** - and arcs out to zap the enemies. Every 88 kills the flux capacitor surges (**88 MPH!**): a time shockwave slows and stings everything on the map and pays a bonus. And it all plays like a pinball machine - bumpers, flippers, dings, a plunger launch for each wave, a jackpot when you clear one, TILT when they reach the car, a score and combo multiplier, and a dot-matrix display calling out the big moments. The hardest level:
+6. **88 MPH** - a time-travel town square at night: neon-lit streets, a clock tower stopped at 10:04, street lamps, and the time machine parked in the middle - a stainless gull-wing car on hover pods with its flux capacitor pulsing. Visitors from the future arrive through time portals at eight gates in a white flash, leaving twin trails of fire on the road. Every so often lightning strikes the clock tower - **1.21 gigawatts** - and arcs out to zap the enemies. Every 88 kills the flux capacitor surges (**88 MPH!**): a time shockwave slows and stings everything on the map and pays a bonus. And it all plays like a pinball machine - bumpers, flippers, dings, a plunger launch for each wave, a jackpot when you clear one, TILT when they reach the car, a score and combo multiplier, and a dot-matrix display at the top of the screen calling out the big moments:
    - **Hoverboarder** - quick, weaving along the street on a pink hoverboard
    - **Drone** - a camera drone flying straight at the car
    - **Servo Bot** - a heavily armoured chrome robot
@@ -45,9 +45,19 @@ Pick a level on the title screen with left / right. Winning a level takes you st
    - **Hover Car** - big and armoured; its sonic boom jams the towers around it
    - **Time Train** - the boss: a flying steam locomotive that time-jumps ahead in a flash of fire, sends out drones, and splits into paradoxes when it falls
 
-The bigger maps (levels 5 and 6) are drawn smaller to fit, so use **L / R** to zoom in and out - the view follows the cursor.
+7. **Cloud Kingdom** - a princess's castle floating in the sky, on a double ring of rainbow road through a sea of clouds, with candy-striped blocks, flower meadows, star lamps, rainbow arches over the gates, hot-air balloons, butterflies, bubbles, shooting stars and a great rainbow behind it all. A whole storybook of troublemakers is after the castle, and it plays like a magical pinball machine too: every 77 kills a **Wishing Star** bursts over the castle and stings everything on the map, the castle's orb fires **Rainbow Blasts** at whatever is close, wave clears ring up a **Royal Jackpot**, and clearing a wave without a single leak pays a **Perfect** bonus with fireworks. The hardest level:
+   - **Crazy Unicorn** - charges ahead trailing rainbow sparks
+   - **Leprechaun** - blinks forward in a puff of clover and can't be hit while he does
+   - **Frog** - hops along in big leaps (it's wearing a tiny crown)
+   - **Pixie** - flies straight over everything on shimmering wings
+   - **Troll** - huge, slow and very tough, swinging a club
+   - **Witch** - her hex jams the towers around her
+   - **Gingerbread Man** - run, run, as fast as you can; break him and he crumbles into little ones
+   - **Dragon** - the boss: armoured, breathes fire that jams towers, calls up pixies, and bursts into pixies when it falls
 
-Each level has its own music (dreary for the storm, light and fresh for autumn, fun and spooky for Halloween, slow and mysterious for the island, an epic stormy sea shanty for the pirates, driving 80s synthwave for 88 MPH). Battles shake the screen with a little depth parallax (the near side of the board moves more than the far side), big hits punch the view, and every weapon has extra flourishes: blaster muzzle flashes and flying casings, mortar landing markers, fireballs and scorch marks, frost splinters and frosted-over enemies, and tesla coils that visibly charge up before they fire.
+The bigger maps (levels 5, 6 and 7) are drawn smaller to fit, so use **L / R** to zoom in and out - the view follows the cursor.
+
+Each level has its own music (dreary for the storm, light and fresh for autumn, fun and spooky for Halloween, slow and mysterious for the island, an epic stormy sea shanty for the pirates, driving 80s synthwave for 88 MPH, a sparkling fairy-tale waltz for the Cloud Kingdom), and its own set of sound effects (wooden and leafy in autumn, creaky and ghostly at Halloween, clockwork on the island, pinball bells for 88 MPH and magical chimes and twinkles in the sky). Battles shake the screen with a little depth parallax (the near side of the board moves more than the far side), big hits punch the view, and every weapon has extra flourishes: blaster muzzle flashes and flying casings, mortar landing markers, fireballs and scorch marks, frost splinters and frosted-over enemies, and tesla coils that visibly charge up before they fire.
 
 ## Controls (Classic Controller)
 
@@ -91,5 +101,5 @@ Locally with devkitPro installed: `make`.
 - The scenery is projected once and only re-lit each frame, which keeps the Wii's CPU well inside 60 fps.
 - The sea swell on level 5 is part of the view transform: a slow roll and bob folded into the 2D affine every vertex already goes through, plus one table lookup per vertex for a wave rolling across the screen.
 - The CPU builds the next frame while the GPU is still drawing the last one.
-- Every sound and all six music loops are composed and synthesized at start-up (a small offline synth with plucked strings, FM bells, a theremin, a fiddle, an accordion, brass, timpani and reverb). No asset files.
+- Every sound and all seven music loops are synthesized by the game itself (a small offline synth with plucked strings, FM bells, a theremin, a fiddle, an accordion, brass, a harp, a celesta, timpani and reverb). No asset files. The sound effects are made behind a loading bar at start-up; the music is composed on a background thread while you play, the level you're on first, so the game boots in a few seconds.
 - Trees sway by storing a sway weight with each cached vertex, so the whole forest moves for the cost of one sine per tree.

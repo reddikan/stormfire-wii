@@ -10,6 +10,8 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include <malloc.h>
+#include "fastmath.h"                       /* quick sin / cos / exp: composing is mostly envelopes and oscillators */
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -18,15 +20,17 @@
 #define TAU_F 6.28318530718f
 
 #define MUS_MAX (MUS_RATE * 30 + 16)
-static int16_t MUS[MUS_TRACKS][MUS_MAX] __attribute__((aligned(32)));
+static int16_t *MUS[MUS_TRACKS];          /* each loop is allocated when it is composed */
 static int     mus_len[MUS_TRACKS];
+static int     mus_done[MUS_TRACKS];
+static volatile int mus_ready[MUS_TRACKS];
 static float  *mix;                       /* the loop being built (only needed while composing) */
 static int     N;                         /* length of the loop being built */
 static float   BEAT;                      /* seconds per beat */
 static uint32_t rng = 0x1234567u;
 static int     ready;
 
-static const uint8_t VOL[MUS_TRACKS] = { 100, 92, 96, 100, 104, 100 };
+static const uint8_t VOL[MUS_TRACKS] = { 100, 92, 96, 100, 104, 100, 100 };
 
 static float frnd(void)                  /* -1..1 */
 {
@@ -292,7 +296,12 @@ static void finish(int track)
     float peak = 0;
     for (int i = 0; i < N; i++) if (fabsf(mix[i]) > peak) peak = fabsf(mix[i]);
     float k = peak > 0 ? 0.85f * 32000.0f / peak : 0;
-    for (int i = 0; i < N; i++) MUS[track][i] = (int16_t)(mix[i] * k);
+    /* convert to 16-bit in place (each sample lands at or before where it was read), then hand back the rest */
+    int16_t *out = (int16_t *)mix;
+    for (int i = 0; i < N; i++) out[i] = (int16_t)(mix[i] * k);
+    int16_t *keep = (int16_t *)realloc(mix, (size_t)N * sizeof(int16_t));   /* shrinks in place */
+    MUS[track] = keep ? keep : out;
+    mix = NULL;
     mus_len[track] = N;
 }
 
@@ -718,19 +727,89 @@ static void track_future(void)
     finish(5);
 }
 
+/* harp: a bright plucked string with a soft attack that rings */
+static void harp(float b, float m, float vel) { pluck(b, 1.2f, m, vel, 0.75f); }
+
+/* ------------------------------------------------------------------ */
+/* 6: Cloud Kingdom - a fairy-tale waltz in F major, 3/4                */
+/* ------------------------------------------------------------------ */
+static void track_fairy(void)
+{
+    begin(150, 72);                                   /* 24 bars of three */
+    enum { F, DM, BB, C, AM, GM };
+    static const int PROG[24] = { F, F, DM, DM, BB, BB, C, C, F, AM, DM, GM, BB, C, F, C,
+                                  BB, C, AM, DM, GM, C, F, F };
+    static const float ROOT[6] = { 41, 38, 46, 36, 45, 43 };
+    static const float CH[6][3] = { {65, 69, 72}, {62, 65, 69}, {62, 65, 70}, {64, 67, 72}, {64, 69, 72}, {62, 67, 70} };
+    for (int bar = 0; bar < 24; bar++) {
+        int c = PROG[bar];
+        float b0 = (float)bar * 3;
+        pluck(b0, 0.9f, ROOT[c], 0.7f, 0.4f);                                   /* oom */
+        for (int q = 1; q < 3; q++)                                             /* pah-pah */
+            for (int k = 0; k < 3; k++) pluck(b0 + (float)q, 0.5f, CH[c][k], 0.28f, 0.55f);
+        for (int k = 0; k < 3; k++) pad(b0, 3.2f, CH[c][k] - 12, 0.2f, 1100.0f);
+        for (int q = 0; q < 6; q++) {                                           /* harp arpeggio rippling up */
+            static const int ORD[6] = { 0, 1, 2, 0, 1, 2 };
+            harp(b0 + (float)q * 0.5f, CH[c][ORD[q]] + (q >= 3 ? 12.0f : 0.0f), 0.22f);
+        }
+        if ((bar & 1) == 1)                                                     /* celesta sparkle */
+            for (int k = 0; k < 3; k++) bell(b0 + 2.0f + (float)k * 0.33f, CH[c][2 - k] + 24.0f, 0.22f, 0.4f);
+        noise_hit(b0, 0.15f, 0.25f, 7500.0f, 6.0f);                            /* a soft triangle ting */
+    }
+    static const Note MEL[24][3] = {
+        { {0, 2, 72}, {2, 1, 69} }, { {0, 3, 77} },
+        { {0, 2, 74}, {2, 1, 72} }, { {0, 3, 69} },
+        { {0, 1, 70}, {1, 1, 72}, {2, 1, 74} }, { {0, 3, 77} },
+        { {0, 2, 76}, {2, 1, 74} }, { {0, 3, 72} },
+        { {0, 2, 72}, {2, 1, 76} }, { {0, 3, 81} },
+        { {0, 2, 77}, {2, 1, 74} }, { {0, 3, 79} },
+        { {0, 1, 77}, {1, 1, 76}, {2, 1, 74} }, { {0, 3, 76} },
+        { {0, 2, 77}, {2, 1, 81} }, { {0, 3, 79} },
+        { {0, 1, 82}, {1, 1, 81}, {2, 1, 79} }, { {0, 3, 84} },
+        { {0, 2, 81}, {2, 1, 77} }, { {0, 3, 74} },
+        { {0, 1, 79}, {1, 1, 77}, {2, 1, 74} }, { {0, 2, 76}, {2, 1, 79} },
+        { {0, 3, 77} }, { {0, 3, 72} },
+    };
+    for (int bar = 0; bar < 24; bar++)
+        for (int k = 0; k < 3; k++) {
+            const Note *nt = &MEL[bar][k];
+            if (nt->m <= 0) continue;
+            flute((float)bar * 3 + nt->b, nt->d, nt->m, 0.75f);
+            bell((float)bar * 3 + nt->b, nt->m + 12, 0.12f, 0.5f);               /* glockenspiel doubling the tune */
+        }
+    reverb(0.5f, 1.35f);
+    finish(6);
+}
+
+static void (*const TRACK_FN[MUS_TRACKS])(void) = { track_storm, track_autumn, track_hallow, track_isle, track_pirate, track_future, track_fairy };
+
+/* the track to compose next: the one wanted now if it is not done yet, else the first one still missing */
+int music_next(int prefer)
+{
+    if (prefer >= 0 && prefer < MUS_TRACKS && !mus_done[prefer]) return prefer;
+    for (int t = 0; t < MUS_TRACKS; t++) if (!mus_done[t]) return t;
+    return -1;
+}
+
+void music_render(int t)
+{
+    if (t < 0 || t >= MUS_TRACKS || mus_done[t]) return;
+    mix = (float *)memalign(32, sizeof(float) * MUS_MAX);   /* composed in float, then shrunk to 16-bit in place */
+    if (!mix) return;
+    rng = 0x1234567u + (uint32_t)t * 7919u;
+    TRACK_FN[t]();
+    if (mix) { free(mix); mix = NULL; }                     /* (only if the track never finished) */
+    mus_done[t] = 1;
+}
+
+void music_set_ready(int t) { if (t >= 0 && t < MUS_TRACKS) mus_ready[t] = 1; }
+int  music_ready(int t) { return t >= 0 && t < MUS_TRACKS && mus_ready[t] && MUS[t]; }
+
 void music_init(void)
 {
     if (ready) return;
     ready = 1;
-    mix = (float *)malloc(sizeof(float) * MUS_MAX);
-    if (!mix) return;
-    track_storm();
-    track_autumn();
-    track_hallow();
-    track_isle();
-    track_pirate();
-    track_future();
-    free(mix); mix = NULL;
+    for (int t; (t = music_next(-1)) >= 0; ) { music_render(t); music_set_ready(t); }
 }
 
 const int16_t *music_data(int track) { return MUS[track]; }
